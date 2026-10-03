@@ -1,0 +1,26 @@
+{
+  "name": "claude-infobar",
+  "owner": {
+    "name": "Giampaolo Gabba",
+    "url": "https://github.com/GiampaoloGabba"
+  },
+  "plugins": [
+    {
+      "name": "infobar",
+      "source": "./",
+      "description": "Riga sopra il prompt con modello, effort, branch e contesto, semaforo di compattazione, ripresa dopo i rate limit e autorizzazioni di sessione",
+      "category": "productivity",
+      "tags": [
+        "context",
+        "compact",
+        "statusline",
+        "rate-limit",
+        "mod",
+        "terminal"
+      ]
+    }
+  ],
+  "metadata": {
+    "description": "Informazioni di sessione sopra il prompt di Claude Code"
+  }
+}

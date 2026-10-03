@@ -1,0 +1,22 @@
+{
+  "name": "infobar",
+  "description": "Una riga sopra il prompt con modello, effort, cartella, branch e contesto, più semaforo di compattazione, ripresa automatica dopo i rate limit e autorizzazioni di sessione che sopravvivono al compact",
+  "version": "0.1.0",
+  "author": {
+    "name": "Giampaolo Gabba",
+    "url": "https://github.com/GiampaoloGabba"
+  },
+  "homepage": "https://github.com/GiampaoloGabba/claude-infobar",
+  "repository": "https://github.com/GiampaoloGabba/claude-infobar",
+  "license": "MIT",
+  "keywords": [
+    "context",
+    "compact",
+    "statusline",
+    "rate-limit",
+    "mod",
+    "terminal",
+    "claude-code"
+  ],
+  "types": "./types/index.d.ts"
+}
