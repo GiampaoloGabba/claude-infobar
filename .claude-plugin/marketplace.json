@@ -8,7 +8,7 @@
     {
       "name": "infobar",
       "source": "./",
-      "description": "Riga sopra il prompt con modello, effort, branch e contesto, semaforo di compattazione, ripresa dopo i rate limit e autorizzazioni di sessione",
+      "description": "Riga sopra il prompt con modello, effort, branch e contesto, semaforo di compattazione, ripresa dopo i rate limit, autorizzazioni di sessione e anteprime delle immagini incollate",
       "category": "productivity",
       "tags": [
         "context",

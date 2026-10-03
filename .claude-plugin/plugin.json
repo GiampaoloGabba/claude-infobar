@@ -1,7 +1,7 @@
 {
   "name": "infobar",
-  "description": "Una riga sopra il prompt con modello, effort, cartella, branch e contesto, più semaforo di compattazione, ripresa automatica dopo i rate limit e autorizzazioni di sessione che sopravvivono al compact",
-  "version": "0.2.1",
+  "description": "Una riga sopra il prompt con modello, effort, cartella, branch e contesto, più semaforo di compattazione, ripresa automatica dopo i rate limit, autorizzazioni di sessione che sopravvivono al compact e anteprime delle immagini incollate",
+  "version": "0.3.0",
   "author": {
     "name": "Giampaolo Gabba",
     "url": "https://github.com/GiampaoloGabba"
@@ -18,5 +18,14 @@
     "terminal",
     "claude-code"
   ],
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "anteprime": {
+      "type": "string",
+      "title": "Anteprime immagini",
+      "description": "Come disegnare le immagini incollate: auto sceglie immagini (protocollo kitty: kitty, Ghostty, WezTerm) o blocchi (mezzi blocchi colorati, per Windows Terminal e gli altri terminali); no le spegne",
+      "default": "auto",
+      "options": ["auto", "immagini", "blocchi", "no"]
+    }
+  }
 }

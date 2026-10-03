@@ -1,7 +1,10 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SessionContextUsage, SessionRateLimit, Timer } from 'claude-code'
+import type { EngineInterface, RenderInput, Register, SessionContextUsage, SessionRateLimit, Timer } from 'claude-code'
 
-import type { Attivita, Ripresa } from '../types'
+import type { Attivita, ImmagineIncollata, Ripresa } from '../types'
+import { fitRow, imageNumbers, pngSize } from './layout'
+import { decodeThumbnail } from './png'
+import { fromBase64, rasterCells, toBase64 } from './raster'
 import {
   AUTONOMO,
   ISTRUZIONI_COMPATTAZIONE,
@@ -42,6 +45,7 @@ const tentativi = atom({ plugin: 'infobar', key: 'tentativi' } as const, 0)
 const agentiFalliti = atom({ plugin: 'infobar', key: 'agentiFalliti' } as const, [])
 const limiti = atom({ plugin: 'infobar', key: 'limiti' } as const, [])
 const autorizzazioni = atom({ plugin: 'infobar', key: 'autorizzazioni' } as const, [])
+const immagini = atom({ plugin: 'infobar', key: 'immagini' } as const, [] as ImmagineIncollata[])
 
 const SOGLIE = [85, 70]
 const MAX_TENTATIVI = 4
@@ -156,7 +160,228 @@ async function annullaRipresa($: EngineInterface) {
   await update($, agentiFalliti, () => [])
 }
 
-export const register: Register = on => {
+// Copre la miniatura più grande (32 x 6 celle = 32 x 12 pixel a mezzi blocchi) con margine per la media.
+const LATO_MINIATURA = 64
+// Un'immagine citata nel prompt ma non ancora su disco si cerca di nuovo a questi intervalli, poi si lascia stare.
+const RITENTA_MS = [250, 1000, 3000]
+
+type Anteprima = 'immagini' | 'blocchi'
+
+// Decisa in session.start; un ridisegno della riga di suggerimento può chiedere una sincronizzazione prima.
+let fissaAnteprima: (anteprima: Anteprima) => void = () => {}
+const anteprima = new Promise<Anteprima>(resolve => (fissaAnteprima = resolve))
+let trovata: { sessione: string; cartella: string } | undefined
+let radici: string[] | undefined
+// I numeri delle immagini disegnate, così un prompt invariato non tocca né il disco né lo stato;
+// undefined finché il disegno è incompleto o, dopo un reload, sconosciuto.
+let chiaveMostrata: string | undefined
+// I numeri il cui file mancava: le modifiche al prompt non tornano sul disco fino al prossimo tentativo.
+let chiaveMancante: string | undefined
+let ricerche = 0
+let inAttesa: { bozza: string; ritenta: boolean } | undefined
+let sincronizzando = false
+const descritte = new Map<string, Omit<ImmagineIncollata, 'n'>>()
+
+async function terminaleConImmagini($: EngineInterface): Promise<boolean> {
+  if ((await $.env.get('TMUX')) || (await $.env.get('STY'))) return false
+  if ((await $.env.get('KITTY_WINDOW_ID')) || (await $.env.get('GHOSTTY_RESOURCES_DIR'))) return true
+  if (await $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES')) return true
+  const programma = await $.env.get('TERM_PROGRAM')
+  if (programma === 'ghostty' || programma === 'kitty' || programma === 'WezTerm') return true
+  const term = (await $.env.get('TERM')) ?? ''
+  return term.includes('kitty') || term.includes('ghostty')
+}
+
+// Claude Code salva ogni incolla in <tmp>/<progetto>/<sessione>/images/<n>.png: <tmp> è %TEMP%\claude
+// su Windows e /tmp/claude-<uid> altrove, salvo CLAUDE_CODE_TMPDIR.
+async function radiciTemp($: EngineInterface): Promise<string[]> {
+  const configurata = await $.env.get('CLAUDE_CODE_TMPDIR')
+  if (configurata) return [normalizzaPercorso(configurata), `${normalizzaPercorso(configurata)}/claude`]
+  if ((await $.env.get('OS')) === 'Windows_NT') {
+    const temp = (await $.env.get('TEMP')) ?? (await $.env.get('TMP'))
+    return temp ? [`${normalizzaPercorso(temp)}/claude`] : []
+  }
+  const uid = await $.process.run(['id', '-u']).then(
+    ({ stdout }) => stdout.trim(),
+    () => '',
+  )
+  return uid ? [`/tmp/claude-${uid}`] : []
+}
+
+// La cartella del progetto prende il nome dalla directory in cui è partita la sessione, che nel frattempo
+// può essere cambiata: prima si prova il nome ricavato da quella attuale, poi si cerca per id di sessione.
+async function cartellaImmagini($: EngineInterface): Promise<string | undefined> {
+  const sessione = await $.session.id()
+  if (trovata?.sessione === sessione) return trovata.cartella
+  radici ??= await radiciTemp($)
+  const progetto = (await $.session.root()).replace(/[^a-zA-Z0-9]/g, '-')
+  for (const radice of radici) {
+    const ipotesi = `${radice}/${progetto}/${sessione}/images`
+    if (await $.fs.exists(ipotesi)) return (trovata = { sessione, cartella: ipotesi }).cartella
+  }
+  for (const radice of radici) {
+    for (const voce of await $.fs.list(radice).catch(() => [])) {
+      const cartella = `${radice}/${voce.name}/${sessione}/images`
+      if (voce.kind === 'dir' && (await $.fs.exists(cartella))) return (trovata = { sessione, cartella }).cartella
+    }
+  }
+  return undefined
+}
+
+async function descrivi($: EngineInterface, cartella: string | undefined, n: number): Promise<ImmagineIncollata> {
+  const path = `${cartella}/${n}.png`
+  const giaVista = descritte.get(path)
+  if (giaVista) return { n, ...giaVista }
+  if (cartella === undefined || !(await $.fs.exists(path))) return { n, path: null, size: null }
+
+  // Oltre i 4 MiB che $.fs.read concede: si disegna comunque dal file, solo senza proporzioni.
+  const base64 = await $.fs.read(path, { as: 'bytes' }).then(
+    r => r.base64,
+    () => undefined,
+  )
+  const size = base64 === undefined ? null : pngSize(base64)
+  if (base64 !== undefined && size === null) return { n, path: null, size: null }
+
+  let immagine: Omit<ImmagineIncollata, 'n'> = { path, size }
+  if ((await anteprima) === 'blocchi') {
+    let thumbnail: ImmagineIncollata['thumbnail'] = null
+    if (base64 !== undefined) {
+      try {
+        const decodificata = decodeThumbnail(fromBase64(base64), LATO_MINIATURA, LATO_MINIATURA)
+        thumbnail = { width: decodificata.width, height: decodificata.height, rgba: toBase64(decodificata.rgba) }
+      } catch {
+        // PNG interlacciato o danneggiato: il riquadro mostra il tag al posto della miniatura.
+      }
+    }
+    immagine = { ...immagine, thumbnail }
+  }
+  descritte.set(path, immagine)
+  return { n, ...immagine }
+}
+
+async function mostra($: EngineInterface, bozza: string, ritenta: boolean) {
+  const numeri = imageNumbers(bozza)
+  const chiave = numeri.join(',')
+  if (chiave === chiaveMostrata) return
+  if (chiave === chiaveMancante && !ritenta) return
+  if (chiave !== chiaveMancante) ricerche = 0
+
+  const cartella = numeri.length > 0 ? await cartellaImmagini($) : undefined
+  const lista: ImmagineIncollata[] = []
+  for (const n of numeri) lista.push(await descrivi($, cartella, n))
+  await update($, immagini, () => lista)
+
+  if (lista.every(immagine => immagine.path !== null)) {
+    chiaveMostrata = chiave
+    chiaveMancante = undefined
+    return
+  }
+  chiaveMostrata = undefined
+  chiaveMancante = chiave
+  const attesa = RITENTA_MS[ricerche++]
+  if (attesa !== undefined) $.clock.after(attesa, async () => sincronizza($, (await $.prompt.read()).text, true))
+}
+
+// Gira su un timer suo e non dentro l'hook che l'ha chiesta, così decodificare un'immagine grande
+// non blocca l'editor né consuma il budget dell'hook. Le modifiche ravvicinate si fondono nell'ultima.
+function sincronizza($: EngineInterface, bozza: string, ritenta = false) {
+  inAttesa = { bozza, ritenta: ritenta || (inAttesa?.ritenta ?? false) }
+  if (sincronizzando) return
+  sincronizzando = true
+  $.clock.after(0, async () => {
+    try {
+      while (inAttesa !== undefined) {
+        const prossima = inAttesa
+        inAttesa = undefined
+        await mostra($, prossima.bozza, prossima.ritenta)
+      }
+    } finally {
+      sincronizzando = false
+    }
+  })
+}
+
+async function comandoApertura($: EngineInterface, path: string): Promise<string[]> {
+  if ((await $.env.get('OS')) === 'Windows_NT') return ['explorer.exe', path.replaceAll('/', '\\')]
+  const { stdout } = await $.process.run(['uname', '-s'])
+  return [stdout.trim() === 'Darwin' ? 'open' : 'xdg-open', path]
+}
+
+// Apre l'immagine con il visualizzatore predefinito; explorer.exe esce con 1 anche quando l'ha aperta.
+async function apri($: EngineInterface, path: string) {
+  const esito = await comandoApertura($, path)
+    .then(argv => $.process.run(argv))
+    .catch((errore: unknown) => errore)
+  if (esito instanceof Error) $.ui.toast(`Non riesco ad aprire ${path}: ${esito.message}`)
+}
+
+/** La riga di miniature sopra la barra, o null quando nel prompt non ci sono immagini. */
+async function rigaImmagini($: EngineInterface, e: RenderInput<'AbovePrompt'>) {
+  if (e.surface !== 'terminal') return null
+  const lista = await read($, immagini)
+  if (lista.length === 0) return null
+
+  const { Box, Button, Image, Raster, Text } = $.ui.resolve(e)
+  // Due righe della banda sono di infobar.
+  const celle = fitRow(lista.map(immagine => immagine.size), e.props.maxRows - 2, e.props.bodyColumns)
+
+  return (
+    <Box flexDirection="row" columnGap={1}>
+      {lista.map((immagine, i) => {
+        const { columns, rows } = celle[i] ?? { columns: 4, rows: 1 }
+        const miniatura = immagine.thumbnail
+        return (
+          <Box flexDirection="column" alignItems="center" borderStyle="round" borderDimColor>
+            {immagine.path === null ? (
+              <Box width={columns} height={rows} alignItems="center" justifyContent="center">
+                <Text dimColor wrap="truncate">nessuna anteprima</Text>
+              </Box>
+            ) : miniatura ? (
+              <Raster
+                key={`immagine-${immagine.n}`}
+                columns={columns}
+                rows={rows}
+                cells={rasterCells({ ...miniatura, rgba: fromBase64(miniatura.rgba) }, columns, rows)}
+              />
+            ) : miniatura === null ? (
+              <Box width={columns} height={rows} alignItems="center" justifyContent="center">
+                <Text dimColor wrap="truncate">[Image #{immagine.n}]</Text>
+              </Box>
+            ) : (
+              <Image
+                key={`immagine-${immagine.n}`}
+                source={{ file: immagine.path, format: 'png' }}
+                columns={columns}
+                rows={rows}
+                alt={`[Image #${immagine.n}]`}
+              />
+            )}
+            {immagine.path === null ? (
+              <Text dimColor>#{immagine.n}</Text>
+            ) : (
+              <Box width={columns} justifyContent="center">
+                <Button
+                  key={`apri-${immagine.n}`}
+                  label={immagine.n <= 9 ? 'apri' : `#${immagine.n}`}
+                  plain
+                  dimColor
+                  {...(immagine.n <= 9 && { hotkey: String(immagine.n) })}
+                  onPress={() => apri($, immagine.path!)}
+                />
+              </Box>
+            )}
+          </Box>
+        )
+      })}
+    </Box>
+  )
+}
+
+export const register: Register = (on, options) => {
+  const scelta = options.anteprime
+  const conAnteprime = scelta !== 'no'
+  if (scelta === 'immagini' || scelta === 'blocchi') fissaAnteprima(scelta)
+
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'compatta', description: 'Compatta solo se non ci sono lavori in corso', argumentHint: '[forza] [istruzioni]' })
     await $.command.register({ name: 'autorizza', description: 'Aggiunge un\'autorizzazione di sessione (alias: db, prod, deploy, commit, push)', argumentHint: '[testo|alias]' })
@@ -173,6 +398,10 @@ export const register: Register = on => {
     await registraContesto($, uso.context)
     await registraLimiti($, uso.rateLimits)
     await armaRipresa($)
+    if (conAnteprime) {
+      if (scelta !== 'immagini' && scelta !== 'blocchi') fissaAnteprima((await terminaleConImmagini($)) ? 'immagini' : 'blocchi')
+      sincronizza($, (await $.prompt.read()).text)
+    }
 
     return next(e)
   })
@@ -205,7 +434,21 @@ export const register: Register = on => {
     return esito
   })
 
+  on('prompt.edit', async ($, e, next) => {
+    const box = await next(e)
+    if (conAnteprime) sincronizza($, box.text)
+    return box
+  })
+
+  // Incollare un'immagine non solleva prompt.edit, ma la riga di suggerimento si ridisegna ("Pasting…"
+  // e ritorno) con il tag [Image #n] già nel prompt: è l'unico evento che segnala l'incolla.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    if (conAnteprime && e.surface === 'terminal') void $.prompt.read().then(box => sincronizza($, box.text))
+    return next(e)
+  })
+
   on('prompt.submit', async ($, e, next) => {
+    if (conAnteprime) sincronizza($, '')
     const daPersona = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
     if (daPersona) {
       if (await read($, ripresa)) await annullaRipresa($)
@@ -352,9 +595,13 @@ export const register: Register = on => {
     const altre = lista.length - (autonomo ? 1 : 0)
     const autorizz = [autonomo ? 'autonomo' : '', altre ? `${altre} autorizz.` : ''].filter(Boolean).join(', ')
     const sotto = await next(e)
+    // Le miniature le disegna infobar stesso: un Button arrivato da next(e) dentro l'albero di un
+    // altro plugin non riceve i clic (Claude Code 2.1.288).
+    const miniature = await rigaImmagini($, e)
 
     return (
       <Box flexDirection="column">
+        {miniature}
         {sotto}
         <Box flexDirection="row">
           {nome ? <Text bold color={coloreModello(nome)}>{nome}</Text> : null}
