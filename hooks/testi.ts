@@ -117,3 +117,42 @@ export function gitdirDaFile(contenuto: string, cartella: string): string | null
 
   return /^([a-z]:)?\//i.test(dir) ? dir : `${cartella}/${dir}`
 }
+
+const FINESTRE: Record<string, { etichetta: string }> = {
+  five_hour: { etichetta: '5h' },
+  seven_day: { etichetta: '7d' },
+}
+
+function finestra(kind: string): { etichetta: string } {
+  const nota = FINESTRE[kind]
+  if (nota) return nota
+  const settimanale = /^seven_day_(.+)$/.exec(kind)
+  if (settimanale?.[1]) return { etichetta: `7d ${settimanale[1]}` }
+  return { etichetta: kind.replace(/_/g, ' ') }
+}
+
+export function formattaDurata(ms: number): string {
+  const minuti = Math.max(0, Math.round(ms / 60_000))
+  const giorni = Math.floor(minuti / 1440)
+  const ore = Math.floor((minuti % 1440) / 60)
+  const min = minuti % 60
+  if (giorni) return ore ? `${giorni}g ${ore}h` : `${giorni}g`
+  if (ore) return min ? `${ore}h ${min}m` : `${ore}h`
+  return `${min}m`
+}
+
+export function descriviLimite(f: { kind: string; percentUsed: number; resetsAt?: string }, ora: number) {
+  const { etichetta } = finestra(f.kind)
+  const reset = f.resetsAt ? Date.parse(f.resetsAt) : Number.NaN
+  const mancanoMs = Number.isNaN(reset) ? null : reset - ora
+  const colore = coloreLivello(f.percentUsed)
+
+  return {
+    etichetta,
+    percentuale: Math.round(f.percentUsed),
+    mancano: mancanoMs !== null && mancanoMs > 0 ? formattaDurata(mancanoMs) : null,
+    colore,
+  }
+}
+
+export const coloreLivello = (p: number) => (p >= 80 ? 'red' : p >= 50 ? 'yellow' : 'green')

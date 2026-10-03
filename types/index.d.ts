@@ -1,5 +1,7 @@
 export type Attivita = { tipo: string; descrizione: string }
 
+export type Limite = { kind: string; percentUsed: number; resetsAt?: string }
+
 export type Ripresa = { at: number; motivo: string; tentativi: number }
 
 declare module 'claude-code' {
@@ -18,6 +20,7 @@ declare module 'claude-code' {
       ripresa: Ripresa | null
       tentativi: number
       agentiFalliti: string[]
+      limiti: Limite[]
       autorizzazioni: string[]
     }
   }

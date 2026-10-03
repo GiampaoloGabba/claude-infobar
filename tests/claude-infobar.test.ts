@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { gitdirDaFile, nomeCartella, nomeModello, orario, ramoDaHead } from '../hooks/testi'
+import { descriviLimite, formattaDurata, gitdirDaFile, nomeCartella, nomeModello, orario, ramoDaHead } from '../hooks/testi'
 
 const cmd = (command: string, args = '') => ({ command, args, origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 120 } })
 
@@ -58,11 +58,12 @@ test('/compatta rifiuta mentre gira un workflow in background', async ($, on) =>
 })
 
 test('la riga sopra il prompt mostra stato e autorizzazioni', async ($, on) => {
+  mock.clock(on)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['banda del motore'] }))
   await $.command.run(cmd('autonomo'))
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'infobar', surface, component: 'AbovePrompt', props: { hasSurvey: false, bodyColumns: 120 } as never })
-    expect(await ui.find({ type: 'Text', text: /compattabile/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /✓/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /autonomo/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /banda del motore/ })).toBeDefined()
     await ui.unmount()
@@ -78,4 +79,28 @@ test('intestazione: nome del modello, branch e worktree', () => {
   expect(gitdirDaFile('gitdir: E:\\repo\\.git\\worktrees\\wt\n', 'E:/repo/wt')).toBe('E:/repo/.git/worktrees/wt')
   expect(gitdirDaFile('gitdir: ../.git/worktrees/wt', '/Users/me/wt')).toBe('/Users/me/wt/../.git/worktrees/wt')
   expect(nomeCartella('C:\\Users\\me\\Progetto\\')).toBe('Progetto')
+})
+
+test('limiti: etichette, tempo al reset e colore per percentuale', () => {
+  const ora = Date.parse('2026-10-03T10:00:00Z')
+  const tra = (ms: number) => new Date(ora + ms).toISOString()
+  const h = 3600_000
+  expect(descriviLimite({ kind: 'five_hour', percentUsed: 20, resetsAt: tra(2 * h + 40 * 60_000) }, ora))
+    .toEqual({ etichetta: '5h', percentuale: 20, mancano: '2h 40m', colore: 'green' })
+  expect(descriviLimite({ kind: 'seven_day', percentUsed: 58, resetsAt: tra(31 * h) }, ora).mancano).toBe('1g 7h')
+  expect(descriviLimite({ kind: 'five_hour', percentUsed: 60, resetsAt: tra(4 * h) }, ora).colore).toBe('yellow')
+  expect(descriviLimite({ kind: 'seven_day', percentUsed: 80, resetsAt: tra(h) }, ora).colore).toBe('red')
+  expect(descriviLimite({ kind: 'seven_day_opus', percentUsed: 10 }, ora).etichetta).toBe('7d opus')
+  expect(formattaDurata(45 * 60_000)).toBe('45m')
+})
+
+test('la prima riga mostra i limiti di utilizzo', async ($, on) => {
+  mock.clock(on)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: [''] }))
+  on('classic.Stop', () => ({}))
+  on('session.measure', () => ({ changed: [] }))
+  await $.session.measure({ context: { window: 1_000_000 }, rateLimits: [{ kind: 'five_hour', percentUsed: 20 }], changed: ['rateLimits'] })
+  const ui = await $.ui.mount({ plugin: 'infobar', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, bodyColumns: 120 } as never })
+  expect(await ui.find({ type: 'Text', text: /20%/ })).toBeDefined()
+  await ui.unmount()
 })

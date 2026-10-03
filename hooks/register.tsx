@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SessionContextUsage, Timer } from 'claude-code'
+import type { EngineInterface, Register, SessionContextUsage, SessionRateLimit, Timer } from 'claude-code'
 
 import type { Attivita, Ripresa } from '../types'
 import {
@@ -8,7 +8,9 @@ import {
   LIVELLI_EFFORT,
   barra,
   coloreEffort,
+  coloreLivello,
   coloreModello,
+  descriviLimite,
   formattaToken,
   genitore,
   gitdirDaFile,
@@ -38,6 +40,7 @@ const inBackground = atom({ plugin: 'infobar', key: 'inBackground' } as const, [
 const ripresa = atom({ plugin: 'infobar', key: 'ripresa' } as const, null)
 const tentativi = atom({ plugin: 'infobar', key: 'tentativi' } as const, 0)
 const agentiFalliti = atom({ plugin: 'infobar', key: 'agentiFalliti' } as const, [])
+const limiti = atom({ plugin: 'infobar', key: 'limiti' } as const, [])
 const autorizzazioni = atom({ plugin: 'infobar', key: 'autorizzazioni' } as const, [])
 
 const SOGLIE = [85, 70]
@@ -77,6 +80,11 @@ async function aggiornaAgenti($: EngineInterface) {
     .filter(a => a.status === 'running' || a.status === 'pending')
     .map(a => ({ tipo: 'agent', descrizione: a.description }))
   if (JSON.stringify(await read($, agenti)) !== JSON.stringify(attivi)) await update($, agenti, () => attivi)
+}
+
+async function registraLimiti($: EngineInterface, finestre: readonly SessionRateLimit[]) {
+  const nuovi = finestre.map(f => ({ kind: f.kind, percentUsed: f.percentUsed, resetsAt: f.resetsAt }))
+  if (JSON.stringify(await read($, limiti)) !== JSON.stringify(nuovi)) await update($, limiti, () => nuovi)
 }
 
 async function registraContesto($: EngineInterface, context: SessionContextUsage): Promise<number | null> {
@@ -161,7 +169,9 @@ export const register: Register = on => {
     if (livelloIniziale && LIVELLI_EFFORT.includes(livelloIniziale)) await update($, effort, () => livelloIniziale)
     fileHead = await trovaHead($)
     await aggiornaIntestazione($)
-    await registraContesto($, (await $.session.usage()).context)
+    const uso = await $.session.usage()
+    await registraContesto($, uso.context)
+    await registraLimiti($, uso.rateLimits)
     await armaRipresa($)
 
     return next(e)
@@ -242,13 +252,18 @@ export const register: Register = on => {
   })
 
   on('session.measure', async ($, e, next) => {
+    await registraLimiti($, e.rateLimits)
     await aggiornaContesto($, e.context)
     return next(e)
   })
 
   on('tool.call', async ($, e, next) => {
     const esito = await next(e)
-    if (!e.agentId) await aggiornaContesto($, (await $.session.usage()).context)
+    if (!e.agentId) {
+      const uso = await $.session.usage()
+      await aggiornaContesto($, uso.context)
+      await registraLimiti($, uso.rateLimits)
+    }
     return esito
   })
 
@@ -324,13 +339,15 @@ export const register: Register = on => {
     const livello = await read($, effort)
     const dir = await read($, cartella)
     const ramo = await read($, branch)
+    const finestre = await read($, limiti)
+    const ora = await $.clock.now()
     const p = await read($, percent)
     const t = await read($, tokens)
     const occupati = [...(await read($, agenti)), ...(await read($, inBackground))]
     const turno = await read($, turnoAttivo)
     const r = await read($, ripresa)
     const lista = await read($, autorizzazioni)
-    const colore = p === null ? undefined : p >= 80 ? 'red' : p >= 50 ? 'yellow' : 'green'
+    const colore = p === null ? undefined : coloreLivello(p)
     const autonomo = lista.includes(AUTONOMO)
     const altre = lista.length - (autonomo ? 1 : 0)
     const autorizz = [autonomo ? 'autonomo' : '', altre ? `${altre} autorizz.` : ''].filter(Boolean).join(', ')
@@ -351,19 +368,29 @@ export const register: Register = on => {
           {t === null ? null : <Text bold>{`${formattaToken(t)} `}</Text>}
           <Text color={colore}>{p === null ? '-' : `${p}%`}</Text>
           {p === null ? null : <Text color={colore}>{` ${barra(p)}`}</Text>}
-          <Text dimColor>{' | '}</Text>
+          <Text>{' '}</Text>
           {occupati.length ? (
-            <Text color="yellow" wrap="truncate">{`attendi: ${riepilogoAttivita(occupati)}`}</Text>
+            <Text color="yellow">{`◷ ${occupati.length}`}</Text>
           ) : turno ? (
-            <Text dimColor>turno in corso</Text>
+            <Text dimColor>…</Text>
           ) : (
-            <Text color="green">compattabile</Text>
+            <Text dimColor>✓</Text>
           )}
           {autorizz ? <Text dimColor>{' | '}</Text> : null}
           {autorizz ? <Text color="cyan">{autorizz}</Text> : null}
           {r ? <Text dimColor>{' | '}</Text> : null}
           {r ? <Text color="magenta">{`ripresa ${orario(r.at)} `}</Text> : null}
           {r ? <Button key="annulla-ripresa" label="annulla" plain onPress={() => annullaRipresa($)} /> : null}
+          {finestre.map(f => {
+            const l = descriviLimite(f, ora)
+            return (
+              <Text key={f.kind}>
+                <Text dimColor>{` | ${l.etichetta} `}</Text>
+                <Text color={l.colore}>{`${l.percentuale}%`}</Text>
+                {l.mancano ? <Text dimColor>{` ${l.mancano}`}</Text> : null}
+              </Text>
+            )
+          })}
         </Box>
       </Box>
     )
