@@ -157,6 +157,8 @@ export const register: Register = on => {
     await $.command.register({ name: 'ripresa', description: 'Stato della ripresa automatica dopo un limite', argumentHint: '[annulla]', immediate: true })
     const dir = nomeCartella(await $.session.cwd())
     if ((await read($, cartella)) !== dir) await update($, cartella, () => dir)
+    const livelloIniziale = await $.env.get('CLAUDE_EFFORT')
+    if (livelloIniziale && LIVELLI_EFFORT.includes(livelloIniziale)) await update($, effort, () => livelloIniziale)
     fileHead = await trovaHead($)
     await aggiornaIntestazione($)
     await registraContesto($, (await $.session.usage()).context)
@@ -336,6 +338,7 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column">
+        {sotto}
         <Box flexDirection="row">
           {nome ? <Text bold color={coloreModello(nome)}>{nome}</Text> : null}
           {livello ? <Text color={coloreEffort(livello)}>{` ${livello}`}</Text> : null}
@@ -362,7 +365,6 @@ export const register: Register = on => {
           {r ? <Text color="magenta">{`ripresa ${orario(r.at)} `}</Text> : null}
           {r ? <Button key="annulla-ripresa" label="annulla" plain onPress={() => annullaRipresa($)} /> : null}
         </Box>
-        {sotto}
       </Box>
     )
   })
