@@ -68,11 +68,30 @@ Si ferma dopo 4 tentativi di fila. Se nel frattempo scrivi tu qualcosa, la ripre
 
 ## Immagini incollate
 
-Quando incolli un'immagine nel prompt, sopra la barra compare la sua miniatura al posto del solo `[Image #1]`, con le proporzioni giuste e senza dover premere un altro tasto. Sotto ogni miniatura c'è `apri`: un clic apre l'immagine con il visualizzatore di sistema (`explorer.exe`, `open` o `xdg-open`). Con la banda attiva (ctrl+x tab) fa lo stesso il tasto col numero dell'immagine. Le miniature spariscono quando invii il prompt o cancelli i tag.
+Quando incolli un'immagine nel prompt (Alt+V su Windows, Ctrl+V su macOS e Linux, oppure il percorso completo di un file immagine incollato come testo), Claude Code la trasforma in un tag `[Image #1]`. Sopra le due righe della barra compare subito una miniatura per ogni tag, senza dover premere un altro tasto. Le miniature mantengono le proporzioni, si rimpiccioliscono per stare nello spazio disponibile e spariscono quando invii il prompt o cancelli i tag.
 
-Nei terminali con il protocollo grafico kitty (kitty, Ghostty, WezTerm) la miniatura è l'immagine vera. Negli altri, Windows Terminal compreso, è disegnata a mezzi blocchi colorati: bassa risoluzione, ma basta a capire quale immagine è quale. L'opzione `anteprime` (in `/config`) sceglie: `auto`, `immagini`, `blocchi`, `etichette` (niente miniatura, solo `1: Image #1` cliccabile, senza leggere i file) oppure `no` per spegnerle.
+Sotto ogni miniatura c'è `1: apri`: il numero è il tasto rapido, fino a 9 (dalla decima in poi l'etichetta è `#10`, senza tasto). Un clic apre l'immagine con il visualizzatore di sistema: `explorer.exe` su Windows, `open` su macOS, `xdg-open` su Linux. Con la banda attiva (ctrl+x e poi tab) fa lo stesso il tasto col numero. Se il file in cache non si trova, al posto della miniatura c'è "nessuna anteprima".
 
-Non c'è nessun timer che controlla il prompt: la mod si aggiorna quando il prompt cambia, quando la riga di suggerimento sotto il prompt si ridisegna per l'incolla e all'invio. Ogni immagine si legge una sola volta. Il PNG è decodificato in TypeScript dentro la mod (le mod non hanno zlib); uno screenshot normale richiede qualche decina di millisecondi, un 4K quasi un secondo.
+L'opzione `anteprime` (in `/config`, alla voce "Anteprime immagini") sceglie come disegnarle:
+
+| Valore | Cosa mostra |
+| --- | --- |
+| `auto` | Il predefinito: `immagini` in kitty, Ghostty e WezTerm (fuori da tmux o screen), `blocchi` altrove. |
+| `immagini` | L'immagine vera, con il protocollo grafico kitty. Il file lo legge il terminale. |
+| `blocchi` | Una miniatura a mezzi blocchi colorati: ogni cella mostra due pixel, `▀` con quello sopra come colore del carattere e quello sotto come sfondo. Funziona in qualunque terminale truecolor. |
+| `etichette` | Niente miniatura, solo una riga cliccabile come `1: Image #1   2: Image #2`. I file non vengono letti. |
+| `no` | Spente. |
+
+Come si comportano i terminali:
+
+- **kitty, Ghostty, WezTerm**: immagine vera.
+- **Windows Terminal**: non supporta il protocollo kitty, quindi `auto` usa i blocchi. La risoluzione è molto bassa (la miniatura più grande è 32x6 celle, cioè 32x12 pixel): basta a distinguere le immagini a colpo d'occhio da colori e disposizione, non a leggere il testo di uno screenshot. Per guardarla davvero c'è `apri`. Windows Terminal supporta Sixel, ma l'API delle mod di Claude Code disegna immagini solo con il protocollo kitty, quindi per ora Sixel non si può usare.
+- **iTerm2**: `auto` sceglie i blocchi, perché Claude Code non dice alle mod se il terminale supporta la grafica kitty (lo chiede al terminale e si tiene la risposta) e la mod si fida solo di kitty, Ghostty e WezTerm. Se con `anteprime: immagini` il tuo iTerm2 mostra le immagini vere, tieni quello. Se invece una miniatura mostra solo il testo `[Image #n]`, il terminale non supporta il protocollo kitty: torna a `blocchi` o `etichette`.
+- **tmux e screen**: le immagini non passano attraverso il multiplexer, quindi blocchi.
+
+Per i blocchi la mod decodifica il PNG da sola, in TypeScript (le mod non hanno zlib). Uno screenshot normale richiede qualche decina di millisecondi, uno 4K quasi un secondo, una volta sola per ogni incolla. I PNG oltre 4 MiB (il massimo che una mod può leggere) e quelli interlacciati restano senza miniatura a blocchi: compare `[Image #n]`, ma `apri` funziona lo stesso.
+
+Il tag nel prompt non si può rinominare con il nome del file: `[Image #n]` è il modo in cui Claude Code collega l'allegato, e il nome del file si conosce solo quando il prompt viene inviato.
 
 ## Se la barra sparisce
 
