@@ -116,7 +116,10 @@ function ospite(on: On, init: Omit<Ospite, 'chiamate' | 'comandi'>): Ospite {
     conta('fs.list')
     return { value: [] }
   })
-  on('fs.read', ($, e) => ({ value: { base64: o.file[posix(e.path)] ?? '' } }))
+  on('fs.read', ($, e) => {
+    conta('fs.read')
+    return { value: { base64: o.file[posix(e.path)] ?? '' } }
+  })
   on('prompt.submit', ($, e) => ({ text: e.text }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['banda del motore'] }))
   return o
@@ -209,4 +212,28 @@ test('con anteprime "no" la banda non tocca il disco', { options: { anteprime: '
   expect(await ui.find({ type: 'Image' })).toBeUndefined()
   expect(o.chiamate['prompt.read'] ?? 0).toBe(0)
   expect(o.chiamate['fs.exists'] ?? 0).toBe(0)
+})
+
+test('a etichette restano solo i tag cliccabili e i file non si leggono', { options: { anteprime: 'etichette' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const cartella = 'C:/Temp/claude/C--work/sess-1/images'
+  const o = ospite(on, {
+    env: { OS: 'Windows_NT', TEMP: 'C:\\Temp' },
+    root: 'C:\\work',
+    file: { [`${cartella}/1.png`]: ROSSO_SU_BLU },
+    bozza: '[Image #1] [Image #2]',
+  })
+
+  await (await $.ui.mount({ ...SUGGERIMENTO, surface: 'terminal' })).unmount()
+  await clock.advance(1)
+
+  const ui = await $.ui.mount({ ...BANDA, surface: 'terminal' })
+  expect(await ui.find({ type: 'Raster' })).toBeUndefined()
+  expect(await ui.find({ type: 'Image' })).toBeUndefined()
+  expect((await ui.find({ type: 'Button', key: 'apri-1' }))?.props).toMatchObject({ label: 'Image #1', hotkey: '1' })
+  expect(await ui.find({ type: 'Text', text: 'Image #2 (non trovata)' })).toBeDefined()
+  expect(o.chiamate['fs.read'] ?? 0).toBe(0)
+
+  await ui.press({ key: 'apri-1' })
+  expect(o.comandi).toEqual([['explorer.exe', `${cartella.replaceAll('/', '\\')}\\1.png`]])
 })

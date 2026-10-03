@@ -165,7 +165,7 @@ const LATO_MINIATURA = 64
 // Un'immagine citata nel prompt ma non ancora su disco si cerca di nuovo a questi intervalli, poi si lascia stare.
 const RITENTA_MS = [250, 1000, 3000]
 
-type Anteprima = 'immagini' | 'blocchi'
+type Anteprima = 'immagini' | 'blocchi' | 'etichette'
 
 // Decisa in session.start; un ridisegno della riga di suggerimento può chiedere una sincronizzazione prima.
 let fissaAnteprima: (anteprima: Anteprima) => void = () => {}
@@ -233,6 +233,10 @@ async function descrivi($: EngineInterface, cartella: string | undefined, n: num
   const giaVista = descritte.get(path)
   if (giaVista) return { n, ...giaVista }
   if (cartella === undefined || !(await $.fs.exists(path))) return { n, path: null, size: null }
+  if ((await anteprima) === 'etichette') {
+    descritte.set(path, { path, size: null })
+    return { n, path, size: null }
+  }
 
   // Oltre i 4 MiB che $.fs.read concede: si disegna comunque dal file, solo senza proporzioni.
   const base64 = await $.fs.read(path, { as: 'bytes' }).then(
@@ -315,13 +319,33 @@ async function apri($: EngineInterface, path: string) {
   if (esito instanceof Error) $.ui.toast(`Non riesco ad aprire ${path}: ${esito.message}`)
 }
 
-/** La riga di miniature sopra la barra, o null quando nel prompt non ci sono immagini. */
-async function rigaImmagini($: EngineInterface, e: RenderInput<'AbovePrompt'>) {
+/** La riga di miniature (o di sole etichette) sopra la barra, o null quando nel prompt non ci sono immagini. */
+async function rigaImmagini($: EngineInterface, e: RenderInput<'AbovePrompt'>, soloEtichette: boolean) {
   if (e.surface !== 'terminal') return null
   const lista = await read($, immagini)
   if (lista.length === 0) return null
 
   const { Box, Button, Image, Raster, Text } = $.ui.resolve(e)
+  if (soloEtichette) {
+    return (
+      <Box flexDirection="row" columnGap={2}>
+        {lista.map(immagine =>
+          immagine.path === null ? (
+            <Text dimColor>{`Image #${immagine.n} (non trovata)`}</Text>
+          ) : (
+            <Button
+              key={`apri-${immagine.n}`}
+              label={`Image #${immagine.n}`}
+              plain
+              dimColor
+              {...(immagine.n <= 9 && { hotkey: String(immagine.n) })}
+              onPress={() => apri($, immagine.path!)}
+            />
+          ),
+        )}
+      </Box>
+    )
+  }
   // Due righe della banda sono di infobar.
   const celle = fitRow(lista.map(immagine => immagine.size), e.props.maxRows - 2, e.props.bodyColumns)
 
@@ -380,7 +404,7 @@ async function rigaImmagini($: EngineInterface, e: RenderInput<'AbovePrompt'>) {
 export const register: Register = (on, options) => {
   const scelta = options.anteprime
   const conAnteprime = scelta !== 'no'
-  if (scelta === 'immagini' || scelta === 'blocchi') fissaAnteprima(scelta)
+  if (scelta === 'immagini' || scelta === 'blocchi' || scelta === 'etichette') fissaAnteprima(scelta)
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'compatta', description: 'Compatta solo se non ci sono lavori in corso', argumentHint: '[forza] [istruzioni]' })
@@ -399,7 +423,7 @@ export const register: Register = (on, options) => {
     await registraLimiti($, uso.rateLimits)
     await armaRipresa($)
     if (conAnteprime) {
-      if (scelta !== 'immagini' && scelta !== 'blocchi') fissaAnteprima((await terminaleConImmagini($)) ? 'immagini' : 'blocchi')
+      if (scelta !== 'immagini' && scelta !== 'blocchi' && scelta !== 'etichette') fissaAnteprima((await terminaleConImmagini($)) ? 'immagini' : 'blocchi')
       sincronizza($, (await $.prompt.read()).text)
     }
 
@@ -597,7 +621,7 @@ export const register: Register = (on, options) => {
     const sotto = await next(e)
     // Le miniature le disegna infobar stesso: un Button arrivato da next(e) dentro l'albero di un
     // altro plugin non riceve i clic (Claude Code 2.1.288).
-    const miniature = await rigaImmagini($, e)
+    const miniature = await rigaImmagini($, e, scelta === 'etichette')
 
     return (
       <Box flexDirection="column">

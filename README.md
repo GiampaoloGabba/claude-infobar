@@ -70,7 +70,7 @@ Si ferma dopo 4 tentativi di fila. Se nel frattempo scrivi tu qualcosa, la ripre
 
 Quando incolli un'immagine nel prompt, sopra la barra compare la sua miniatura al posto del solo `[Image #1]`, con le proporzioni giuste e senza dover premere un altro tasto. Sotto ogni miniatura c'è `apri`: un clic apre l'immagine con il visualizzatore di sistema (`explorer.exe`, `open` o `xdg-open`). Con la banda attiva (ctrl+x tab) fa lo stesso il tasto col numero dell'immagine. Le miniature spariscono quando invii il prompt o cancelli i tag.
 
-Nei terminali con il protocollo grafico kitty (kitty, Ghostty, WezTerm) la miniatura è l'immagine vera. Negli altri, Windows Terminal compreso, è disegnata a mezzi blocchi colorati: bassa risoluzione, ma basta a capire quale immagine è quale. L'opzione `anteprime` (in `/config`) sceglie: `auto`, `immagini`, `blocchi` oppure `no` per spegnerle.
+Nei terminali con il protocollo grafico kitty (kitty, Ghostty, WezTerm) la miniatura è l'immagine vera. Negli altri, Windows Terminal compreso, è disegnata a mezzi blocchi colorati: bassa risoluzione, ma basta a capire quale immagine è quale. L'opzione `anteprime` (in `/config`) sceglie: `auto`, `immagini`, `blocchi`, `etichette` (niente miniatura, solo `1: Image #1` cliccabile, senza leggere i file) oppure `no` per spegnerle.
 
 Non c'è nessun timer che controlla il prompt: la mod si aggiorna quando il prompt cambia, quando la riga di suggerimento sotto il prompt si ridisegna per l'incolla e all'invio. Ogni immagine si legge una sola volta. Il PNG è decodificato in TypeScript dentro la mod (le mod non hanno zlib); uno screenshot normale richiede qualche decina di millisecondi, un 4K quasi un secondo.
 
