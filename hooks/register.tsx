@@ -387,7 +387,7 @@ export const register: Register = on => {
               <Text key={f.kind}>
                 <Text dimColor>{` | ${l.etichetta} `}</Text>
                 <Text color={l.colore}>{`${l.percentuale}%`}</Text>
-                {l.mancano ? <Text dimColor>{` ${l.mancano}`}</Text> : null}
+                {l.mancano ? <Text dimColor>{` ↻ ${l.mancano}`}</Text> : null}
               </Text>
             )
           })}
