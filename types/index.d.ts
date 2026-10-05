@@ -34,6 +34,8 @@ declare module 'claude-code' {
       tentativi: number
       agentiFalliti: string[]
       limiti: Limite[]
+      /** Quando sono stati visti i limiti mostrati, se vengono da una sessione precedente; null se aggiornati. */
+      limitiVistiAlle: number | null
       autorizzazioni: string[]
       immagini: ImmagineIncollata[]
     }

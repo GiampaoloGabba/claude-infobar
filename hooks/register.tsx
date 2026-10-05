@@ -14,6 +14,9 @@ import {
   coloreLivello,
   coloreModello,
   descriviLimite,
+  effortDaImpostazioni,
+  limitiSalvati,
+  formattaDurata,
   formattaToken,
   genitore,
   gitdirDaFile,
@@ -44,6 +47,7 @@ const ripresa = atom({ plugin: 'infobar', key: 'ripresa' } as const, null)
 const tentativi = atom({ plugin: 'infobar', key: 'tentativi' } as const, 0)
 const agentiFalliti = atom({ plugin: 'infobar', key: 'agentiFalliti' } as const, [])
 const limiti = atom({ plugin: 'infobar', key: 'limiti' } as const, [])
+const limitiVistiAlle = atom({ plugin: 'infobar', key: 'limitiVistiAlle' } as const, null)
 const autorizzazioni = atom({ plugin: 'infobar', key: 'autorizzazioni' } as const, [])
 const immagini = atom({ plugin: 'infobar', key: 'immagini' } as const, [] as ImmagineIncollata[])
 
@@ -79,6 +83,31 @@ async function aggiornaIntestazione($: EngineInterface) {
   await aggiornaBranch($)
 }
 
+// Fuori da un turno l'effort non arriva da nessun evento: lo si ricava come fa Claude Code all'avvio.
+async function aggiornaEffort($: EngineInterface) {
+  const daAmbiente = await $.env.get('CLAUDE_EFFORT')
+  const livello =
+    daAmbiente && LIVELLI_EFFORT.includes(daAmbiente)
+      ? daAmbiente
+      : effortDaImpostazioni(await $.settings.read(), await $.session.model())
+  if (livello && (await read($, effort)) !== livello) await update($, effort, () => livello)
+}
+
+async function aggiornaTutto($: EngineInterface, conContesto = true) {
+  await aggiornaIntestazione($)
+  await aggiornaEffort($)
+  const uso = await $.session.usage()
+  if (conContesto) await registraContesto($, await contestoAttuale($, uso.context))
+  if (uso.rateLimits.length) await registraLimiti($, uso.rateLimits)
+  else if (!(await read($, limiti)).length) {
+    const salvati = limitiSalvati(await $.store.get('limiti'), await $.clock.now())
+    if (salvati) {
+      await update($, limiti, () => salvati.finestre)
+      await update($, limitiVistiAlle, () => salvati.at)
+    }
+  }
+}
+
 async function aggiornaAgenti($: EngineInterface) {
   const attivi = (await $.agent.list())
     .filter(a => a.status === 'running' || a.status === 'pending')
@@ -88,7 +117,19 @@ async function aggiornaAgenti($: EngineInterface) {
 
 async function registraLimiti($: EngineInterface, finestre: readonly SessionRateLimit[]) {
   const nuovi = finestre.map(f => ({ kind: f.kind, percentUsed: f.percentUsed, resetsAt: f.resetsAt }))
-  if (JSON.stringify(await read($, limiti)) !== JSON.stringify(nuovi)) await update($, limiti, () => nuovi)
+  const eranoVecchi = (await read($, limitiVistiAlle)) !== null
+  if (eranoVecchi) await update($, limitiVistiAlle, () => null)
+  if (!eranoVecchi && JSON.stringify(await read($, limiti)) === JSON.stringify(nuovi)) return
+  await update($, limiti, () => nuovi)
+  // I limiti sono dell'account: la prossima sessione li mostra subito (in grigio), senza aspettare la prima risposta.
+  if (nuovi.length) await $.store.set('limiti', { at: await $.clock.now(), finestre: nuovi })
+}
+
+// Prima della prima risposta Claude Code non sa quanti token ha il contesto: si stima come fa /context, in locale.
+async function contestoAttuale($: EngineInterface, context: SessionContextUsage): Promise<SessionContextUsage> {
+  if (context.tokens !== undefined) return context
+  const totale = (await $.session.usage({ breakdown: 'summary' })).context.breakdown?.totalTokens
+  return totale === undefined ? context : { ...context, tokens: totale, percent: Math.round((totale / context.window) * 100) }
 }
 
 async function registraContesto($: EngineInterface, context: SessionContextUsage): Promise<number | null> {
@@ -414,13 +455,8 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'ripresa', description: 'Stato della ripresa automatica dopo un limite', argumentHint: '[annulla]', immediate: true })
     const dir = nomeCartella(await $.session.cwd())
     if ((await read($, cartella)) !== dir) await update($, cartella, () => dir)
-    const livelloIniziale = await $.env.get('CLAUDE_EFFORT')
-    if (livelloIniziale && LIVELLI_EFFORT.includes(livelloIniziale)) await update($, effort, () => livelloIniziale)
     fileHead = await trovaHead($)
-    await aggiornaIntestazione($)
-    const uso = await $.session.usage()
-    await registraContesto($, uso.context)
-    await registraLimiti($, uso.rateLimits)
+    await aggiornaTutto($)
     await armaRipresa($)
     if (conAnteprime) {
       if (scelta !== 'immagini' && scelta !== 'blocchi' && scelta !== 'etichette') fissaAnteprima((await terminaleConImmagini($)) ? 'immagini' : 'blocchi')
@@ -507,7 +543,21 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'model' }, async ($, e, next) => {
     const esito = await next(e)
     const nome = nomeModello(await $.session.model())
-  if ((await read($, modello)) !== nome) await update($, modello, () => nome)
+    if ((await read($, modello)) !== nome) await update($, modello, () => nome)
+    await aggiornaEffort($)
+    return esito
+  })
+
+  // Dopo /compact, /clear o una ripresa la barra si rilegge tutta: niente righe vuote fino al prossimo turno.
+  on('classic.SessionStart', async ($, e, next) => {
+    const esito = await next(e)
+    // Dopo /compact il contesto l'ha già fissato session.compact; l'ultima risposta qui è ancora quella di prima.
+    if (e.source !== 'startup') await aggiornaTutto($, e.source !== 'compact')
+    if (e.context_tokens !== undefined) {
+      const { context } = await $.session.usage()
+      const percent = Math.round((e.context_tokens / context.window) * 100)
+      await aggiornaContesto($, { window: context.window, tokens: e.context_tokens, percent })
+    }
     return esito
   })
 
@@ -538,7 +588,13 @@ export const register: Register = (on, options) => {
     const extra = [ISTRUZIONI_COMPATTAZIONE]
     const r = await read($, ripresa)
     if (r) extra.push(`È programmata una ripresa automatica alle ${orario(r.at)} (${r.motivo}).`)
-    return next({ ...e, instructions: [e.instructions, ...extra].filter(Boolean).join('\n\n') })
+    const esito = await next({ ...e, instructions: [e.instructions, ...extra].filter(Boolean).join('\n\n') })
+    if ('tokensAfter' in esito && esito.tokensAfter !== undefined) {
+      const { context } = await $.session.usage()
+      const percent = Math.round((esito.tokensAfter / context.window) * 100)
+      await aggiornaContesto($, { window: context.window, tokens: esito.tokensAfter, percent })
+    }
+    return esito
   })
 
   on('prompt.compose', async ($, e, next) => {
@@ -599,14 +655,16 @@ export const register: Register = (on, options) => {
     return { text: r ? `Ripresa automatica alle ${orario(r.at)} (${r.motivo}, tentativo ${r.tentativi}/${MAX_TENTATIVI}).` : 'Nessuna ripresa programmata.' }
   })
 
+  // Sul desktop l'app mostra già queste informazioni a modo suo: la barra è solo per il terminale.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
+    if (e.surface !== 'terminal' || e.props.hasSurvey) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const nome = await read($, modello)
     const livello = await read($, effort)
     const dir = await read($, cartella)
     const ramo = await read($, branch)
     const finestre = await read($, limiti)
+    const vistiAlle = await read($, limitiVistiAlle)
     const ora = await $.clock.now()
     const p = await read($, percent)
     const t = await read($, tokens)
@@ -657,11 +715,12 @@ export const register: Register = (on, options) => {
             return (
               <Text key={f.kind}>
                 <Text dimColor>{` | ${l.etichetta} `}</Text>
-                <Text color={l.colore}>{`${l.percentuale}%`}</Text>
+                {vistiAlle === null ? <Text color={l.colore}>{`${l.percentuale}%`}</Text> : <Text dimColor>{`${l.percentuale}%`}</Text>}
                 {l.mancano ? <Text dimColor>{` ↻ ${l.mancano}`}</Text> : null}
               </Text>
             )
           })}
+          {vistiAlle !== null && finestre.length ? <Text dimColor>{` · ${formattaDurata(ora - vistiAlle)} fa`}</Text> : null}
         </Box>
       </Box>
     )

@@ -30,7 +30,9 @@ Se hai una statusline che mostra modello, branch e contesto, puoi toglierla: la 
 
 ## Cosa si vede
 
-La prima riga ha modello, effort, cartella e branch git (anche dentro un worktree). Il modello è colorato per famiglia, Opus blu, Sonnet arancio, Haiku verde; l'effort va dal verde di `low` al rosso di `max`.
+La prima riga ha modello, effort, cartella e branch git (anche dentro un worktree). Il modello è colorato per famiglia, Opus blu, Sonnet arancio, Haiku verde; l'effort va dal verde di `low` al rosso di `max`. All'avvio l'effort viene letto dalle impostazioni (`effortLevel`, o quello del modello in `modelSettings`), poi si aggiorna a ogni turno e con `/effort`. Dopo `/compact`, `/clear` o una ripresa la barra si rilegge subito. Prima della prima risposta il contesto è una stima fatta come `/context` (in una sessione ripresa è il valore esatto), e i limiti di utilizzo sono gli ultimi visti su questo computer, in grigio e con l'età (`5h 33% · 2h fa`) finché la prima risposta non porta quelli aggiornati; le finestre già azzerate non compaiono. Se usi Claude anche altrove (altri computer, claude.ai), quei valori grigi possono essere più bassi del reale.
+
+La barra compare solo nel terminale: nell'app desktop non viene disegnata, mentre i comandi continuano a funzionare.
 
 In fondo alla seconda riga ci sono i limiti di utilizzo dell'abbonamento: la finestra di 5 ore, quella settimanale ed eventuali limiti settimanali per modello, ognuno con la percentuale usata e, dopo `↻`, il tempo che manca al reset. La percentuale è la quota del limite già consumata e usa gli stessi colori del contesto: verde sotto il 50%, gialla fino all'80%, rossa oltre. Senza abbonamento (chiave API) questa parte non compare.
 

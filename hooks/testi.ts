@@ -1,4 +1,4 @@
-import type { Attivita } from '../types'
+import type { Attivita, Limite } from '../types'
 
 export const AUTONOMO =
   "Modalità autonoma: porta a termine tutto il lavoro concordato senza fermarti a chiedere conferme. Non fermarti finché restano passi del piano; le istanze nuove di principi già decisi si eseguono. Fermati solo per decisioni genuinamente nuove (prendile, registrale e proponile per ratifica a fine lavoro) o per azioni irreversibili non coperte da altre autorizzazioni. I comandi lunghi vanno in background."
@@ -93,6 +93,28 @@ const COLORI_EFFORT: Record<string, string> = { low: 'green', medium: 'cyan', hi
 export const coloreEffort = (livello: string) => COLORI_EFFORT[livello] ?? 'gray'
 
 export const LIVELLI_EFFORT = Object.keys(COLORI_EFFORT)
+
+/** I limiti salvati da una sessione precedente, con le sole finestre non ancora azzerate; null se non ne resta nessuna. */
+export function limitiSalvati(salvati: unknown, ora: number): { at: number; finestre: Limite[] } | null {
+  const { at, finestre } = (salvati ?? {}) as { at?: unknown; finestre?: unknown }
+  if (typeof at !== 'number' || !Array.isArray(finestre)) return null
+  const valide = finestre.filter(
+    (l): l is Limite =>
+      typeof l?.kind === 'string' &&
+      typeof l.percentUsed === 'number' &&
+      typeof l.resetsAt === 'string' &&
+      Date.parse(l.resetsAt) > ora,
+  )
+  return valide.length ? { at, finestre: valide } : null
+}
+
+/** L'effort che le impostazioni danno al modello: quello del modello in modelSettings, altrimenti effortLevel. */
+export function effortDaImpostazioni(impostazioni: Readonly<Record<string, unknown>>, idModello: string): string | null {
+  const perModello = impostazioni.modelSettings as Record<string, { effortLevel?: unknown } | undefined> | undefined
+  const id = idModello.replace(/\[.*\]$/, '')
+  const livello = perModello?.[idModello]?.effortLevel ?? perModello?.[id]?.effortLevel ?? impostazioni.effortLevel
+  return typeof livello === 'string' && LIVELLI_EFFORT.includes(livello) ? livello : null
+}
 
 export const normalizzaPercorso = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
 
