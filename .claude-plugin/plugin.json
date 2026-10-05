@@ -1,7 +1,7 @@
 {
   "name": "infobar",
   "description": "Una riga sopra il prompt con modello, effort, cartella, branch e contesto, più semaforo di compattazione, ripresa automatica dopo i rate limit, autorizzazioni di sessione che sopravvivono al compact e anteprime delle immagini incollate",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "author": {
     "name": "Giampaolo Gabba",
     "url": "https://github.com/GiampaoloGabba"

@@ -502,8 +502,8 @@ export const register: Register = (on, options) => {
 
   // Incollare un'immagine non solleva prompt.edit, ma la riga di suggerimento si ridisegna ("Pasting…"
   // e ritorno) con il tag [Image #n] già nel prompt: è l'unico evento che segnala l'incolla.
-  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
-    if (conAnteprime && e.surface === 'terminal') void $.prompt.read().then(box => sincronizza($, box.text))
+  on('ui.render', { component: 'PromptHint', surface: 'terminal' }, async ($, e, next) => {
+    if (conAnteprime) void $.prompt.read().then(box => sincronizza($, box.text))
     return next(e)
   })
 
@@ -655,9 +655,10 @@ export const register: Register = (on, options) => {
     return { text: r ? `Ripresa automatica alle ${orario(r.at)} (${r.motivo}, tentativo ${r.tentativi}/${MAX_TENTATIVI}).` : 'Nessuna ripresa programmata.' }
   })
 
-  // Sul desktop l'app mostra già queste informazioni a modo suo: la barra è solo per il terminale.
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.surface !== 'terminal' || e.props.hasSurvey) return next(e)
+  // Sul desktop l'app mostra già queste informazioni a modo suo: la barra è solo per il terminale. Il filtro
+  // sta nel matcher e non nel corpo, perché il desktop riserva lo spazio della banda a ogni plugin che la aggancia.
+  on('ui.render', { component: 'AbovePrompt', surface: 'terminal' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const nome = await read($, modello)
     const livello = await read($, effort)
