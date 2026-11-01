@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, RenderInput } from 'claude-code'
 
-import type { ContoSessione, FinestraConto, StatoConti } from '../types'
+import type { Conto, ContoSessione, FinestraConto, StatoConti } from '../types'
 import { STATO_CONTO, aliasDaSequenza, contiDaCswap, emailDaConfig, profiloFisso } from './conti'
 import { coloreLivello } from './testi'
 
@@ -34,7 +34,7 @@ export async function conCswap($: EngineInterface) {
 }
 
 /** Ricava l'account della sessione dai file locali, senza chiamare cswap né la rete. */
-export async function aggiornaContoSessione($: EngineInterface) {
+async function calcolaContoSessione($: EngineInterface): Promise<ContoSessione | null> {
   const p = await trovaPercorsi($)
   const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
   const fisso = profiloFisso(configDir, p.principale, p.isWindows)
@@ -51,9 +51,19 @@ export async function aggiornaContoSessione($: EngineInterface) {
     if (alias) risultato = { nome: alias, fisso: Boolean(fisso) }
     ultimaLettura = { file, mtimeMs: stat.mtimeMs, risultato }
   }
+  return risultato
+}
 
+export async function aggiornaContoSessione($: EngineInterface) {
+  const risultato = await calcolaContoSessione($)
   const prima = await read($, contoSessione)
   if (JSON.stringify(prima) !== JSON.stringify(risultato)) await update($, contoSessione, () => risultato)
+}
+
+// Chi disegna prima che session.start abbia scritto lo stato lo calcola da sé; la lettura dello stato
+// resta, così il ridisegno arriva quando il timer lo aggiorna.
+async function contoDaMostrare($: EngineInterface) {
+  return (await read($, contoSessione)) ?? (await calcolaContoSessione($))
 }
 
 // Una sessione su profilo fisso passa il suo CLAUDE_CONFIG_DIR ai figli, e process.run può solo sovrascrivere
@@ -82,6 +92,8 @@ export async function aggiornaConti($: EngineInterface) {
 }
 
 export async function passaA($: EngineInterface, destinazione: string): Promise<string> {
+  const sessione = await contoDaMostrare($)
+  if (sessione?.fisso) return `Istanza ${sessione.nome}: l'account è fisso, lo switch si fa dal profilo principale.`
   if ((await read($, conti)).occupato) return 'cswap è già al lavoro, riprova tra poco.'
   await update($, conti, s => ({ ...s, occupato: `switch a ${destinazione}…` }))
   let esito: string
@@ -119,10 +131,72 @@ const oraMinuti = (ms: number) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-export async function disegnaConti($: EngineInterface, e: RenderInput) {
+const testoQui = (sessione: ContoSessione | null) =>
+  sessione?.fisso ? `Istanza ${sessione.nome}: account fisso, lo switch si fa dal principale` : 'Qui: principale, segue lo switch'
+
+// Su un'istanza con nome lo switch non la toccherebbe (cambia solo ~/.claude): niente pulsanti, e in evidenza
+// c'è l'account dell'istanza invece di quello attivo sul principale.
+const evidenziato = (c: Conto, sessione: ContoSessione | null) => (sessione?.fisso ? c.nome === sessione.nome : c.attivo)
+const etichettaEvidenza = (sessione: ContoSessione | null) => (sessione?.fisso ? 'questa istanza' : 'attivo')
+
+const testoAggiornamento = (s: StatoConti) =>
+  s.occupato ?? (s.aggiornatiAlle ? `aggiornato alle ${oraMinuti(s.aggiornatiAlle)}` : '')
+
+const TEMA_LIVELLO: Record<string, 'success' | 'warning' | 'error'> = { green: 'success', yellow: 'warning', red: 'error' }
+
+// Il desktop disegna testi proporzionali, pulsanti veri e colori del tema: la versione a caratteri del
+// terminale lì sembra una schermata incollata.
+function disegnaContiDesktop($: EngineInterface, e: RenderInput, s: StatoConti, sessione: ContoSessione | null) {
   const { Box, Text, Button } = $.ui.resolve(e)
+
+  const uso = (etichetta: string, f: FinestraConto | null) =>
+    f ? (
+      <Text size="footnote" color="subtle">
+        {`${etichetta} `}
+        <Text weight="semibold" color={TEMA_LIVELLO[coloreLivello(f.pct)]}>{`${f.pct}%`}</Text>
+        {f.clock ? ` · reset ${f.clock}` : ''}
+      </Text>
+    ) : null
+
+  return (
+    <Box flexDirection="column" gap="md" padding="sm">
+      <Text size="footnote" color="subtle">{testoQui(sessione)}</Text>
+      {s.conti.length === 0 && !s.errore && <Text color="subtle">Nessun dato ancora.</Text>}
+      {s.conti.map(c => (
+        <Box key={`conto-${c.numero}`} flexDirection="column" gap="xs">
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center">
+            <Box flexDirection="row" gap="sm" alignItems="center">
+              <Text weight={evidenziato(c, sessione) ? 'semibold' : 'regular'} color={evidenziato(c, sessione) ? 'success' : undefined}>{c.nome}</Text>
+              {evidenziato(c, sessione) && <Text size="caption" weight="semibold" color="success">{etichettaEvidenza(sessione)}</Text>}
+            </Box>
+            {!c.attivo && !sessione?.fisso && (
+              <Button key={`switch-${c.numero}`} variant="secondary" label="Switch" onPress={() => void passaA($, String(c.numero))} />
+            )}
+          </Box>
+          {c.stato === 'ok' ? (
+            <Box flexDirection="row" gap="md">
+              {uso('5h', c.cinqueOre)}
+              {uso('7d', c.settimana)}
+            </Box>
+          ) : (
+            <Text size="footnote" color="warning">{STATO_CONTO[c.stato] ?? c.stato}</Text>
+          )}
+        </Box>
+      ))}
+      {s.errore && <Text size="footnote" color="error">{`Errore: ${s.errore}`}</Text>}
+      <Box flexDirection="row" gap="sm" alignItems="center">
+        <Button key="aggiorna-conti" hotkey="r" label="Aggiorna" onPress={() => void aggiornaConti($)} />
+        <Text size="caption" color="subtle">{testoAggiornamento(s)}</Text>
+      </Box>
+    </Box>
+  )
+}
+
+export async function disegnaConti($: EngineInterface, e: RenderInput) {
   const s = await read($, conti)
-  const sessione = await read($, contoSessione)
+  const sessione = await contoDaMostrare($)
+  if (e.surface !== 'terminal') return disegnaContiDesktop($, e, s, sessione)
+  const { Box, Text, Button } = $.ui.resolve(e)
 
   const uso = (etichetta: string, f: FinestraConto | null) =>
     f ? (
@@ -135,19 +209,19 @@ export async function disegnaConti($: EngineInterface, e: RenderInput) {
 
   return (
     <Box flexDirection="column">
-      <Text dimColor>{sessione?.fisso ? `Qui: ${sessione.nome}, fisso` : 'Qui: principale, segue lo switch'}</Text>
+      <Text dimColor>{testoQui(sessione)}</Text>
       <Text> </Text>
       {s.conti.length === 0 && !s.errore && <Text dimColor>Nessun dato ancora.</Text>}
       {s.conti.map(c => (
         <Box flexDirection="column" marginBottom={1}>
           <Box flexDirection="row">
-            <Text bold={c.attivo} color={c.attivo ? 'green' : undefined} dimColor={!c.attivo}>
-              {`${c.attivo ? '●' : '○'} ${c.nome}`}
+            <Text bold={evidenziato(c, sessione)} color={evidenziato(c, sessione) ? 'green' : undefined} dimColor={!evidenziato(c, sessione)}>
+              {`${evidenziato(c, sessione) ? '●' : '○'} ${c.nome}`}
             </Text>
             <Text>{'  '}</Text>
-            {c.attivo ? (
-              <Text bold color="black" backgroundColor="green">{' ATTIVO '}</Text>
-            ) : (
+            {evidenziato(c, sessione) ? (
+              <Text bold color="black" backgroundColor="green">{` ${etichettaEvidenza(sessione).toUpperCase()} `}</Text>
+            ) : sessione?.fisso ? null : (
               <Button key={`switch-${c.numero}`} label="switch" onPress={() => void passaA($, String(c.numero))} />
             )}
           </Box>
@@ -165,10 +239,23 @@ export async function disegnaConti($: EngineInterface, e: RenderInput) {
       {s.errore && <Text color="red">{`Errore: ${s.errore}`}</Text>}
       <Box flexDirection="row">
         <Button key="aggiorna-conti" hotkey="r" label="aggiorna" onPress={() => void aggiornaConti($)} />
-        <Text dimColor>
-          {s.occupato ? `  ${s.occupato}` : s.aggiornatiAlle ? `  aggiornato alle ${oraMinuti(s.aggiornatiAlle)}` : ''}
-        </Text>
+        <Text dimColor>{`  ${testoAggiornamento(s)}`}</Text>
       </Box>
+    </Box>
+  )
+}
+
+/** L'account tra le etichette tenui a destra sotto il prompt del desktop, al posto di una riga in più. */
+export async function etichettaContoDesktop($: EngineInterface, e: RenderInput, modi: readonly string[]) {
+  const sessione = await contoDaMostrare($)
+  if (!sessione) return null
+  const { Box, Text, Button } = $.ui.resolve(e)
+  return (
+    <Box flexDirection="row" gap="sm" alignItems="center">
+      {modi.length ? <Text size="caption" color="subtle">{modi.join(' & ')}</Text> : null}
+      <Button key="conto" plain dimColor onPress={() => void apriConti($)}>
+        <Text size="caption">{`${sessione.nome}${sessione.fisso ? ' ⚑' : ' ▾'}`}</Text>
+      </Button>
     </Box>
   )
 }

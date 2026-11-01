@@ -9,6 +9,7 @@ import {
   apriConti,
   conCswap,
   disegnaConti,
+  etichettaContoDesktop,
   pannelloAperto,
   passaA,
   pulsanteConto,
@@ -163,8 +164,8 @@ async function aggiornaContesto($: EngineInterface, context: SessionContextUsage
   const occupati = await attivitaInCorso($)
   $.ui.toast(
     occupati.length
-      ? `Contesto al ${p}%: compatta appena finiscono ${riepilogoAttivita(occupati)}.`
-      : `Contesto al ${p}%: buon momento per /compatta.`,
+      ? `Contesto al ${p}%: /compact appena finiscono ${riepilogoAttivita(occupati)}.`
+      : `Contesto al ${p}%: buon momento per /compact.`,
     { timeoutMs: 8000 },
   )
 }
@@ -460,7 +461,6 @@ export const register: Register = (on, options) => {
   if (scelta === 'immagini' || scelta === 'blocchi' || scelta === 'etichette') fissaAnteprima(scelta)
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'compatta', description: 'Compatta solo se non ci sono lavori in corso', argumentHint: '[forza] [istruzioni]' })
     await $.command.register({ name: 'autorizza', description: 'Aggiunge un\'autorizzazione di sessione (alias: db, prod, deploy, commit, push)', argumentHint: '[testo|alias]' })
     await $.command.register({ name: 'revoca', description: 'Revoca un\'autorizzazione di sessione', argumentHint: '<n|tutte>' })
     await $.command.register({ name: 'autonomo', description: 'Attiva o disattiva la modalità autonoma di sessione' })
@@ -624,19 +624,6 @@ export const register: Register = (on, options) => {
     return { sections: [...r.sections, { id: `${P}:autorizzazioni`, text: sezioneAutorizzazioni(lista), scope: 'session' as const }] }
   })
 
-  on('command.run', { command: 'compatta' }, async ($, e) => {
-    const forza = /^forza\b/i.test(e.args.trim())
-    const istruzioni = e.args.trim().replace(/^forza\b\s*/i, '')
-    const occupati = await attivitaInCorso($)
-    if (occupati.length && !forza) {
-      return { text: `Non compatto: in corso ${riepilogoAttivita(occupati)} (${occupati.map(a => a.descrizione).join('; ')}). Usa /compatta forza per farlo comunque.` }
-    }
-    $.clock.after(0, () => {
-      void $.session.compact(istruzioni ? { instructions: istruzioni } : {}).catch(() => $.ui.toast('Compattazione non riuscita: c\'è un turno in corso, riprova a fine turno.'))
-    })
-    return { text: 'Compatto ora.' }
-  })
-
   on('command.run', { command: 'autorizza' }, async ($, e) => {
     const testo = testoAutorizzazione(e.args)
     if (testo) await update($, autorizzazioni, l => (l.includes(testo) ? l : [...l, testo]))
@@ -685,21 +672,11 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANNELLO_CONTI }, async ($, e) => disegnaConti($, e))
 
-  // Sul desktop il resto della barra non serve (l'app mostra già quelle informazioni), l'account sì. Con
-  // account "no" l'hook non si registra: il desktop riserva la banda a ogni plugin che la aggancia.
+  // Sul desktop l'account sta tra le etichette sotto il prompt: una riga sopra il prompt costerebbe una banda intera.
   if (conAccount) {
-    on('ui.render', { component: 'AbovePrompt', surface: 'desktop' }, async ($, e, next) => {
-      if (e.props.hasSurvey) return next(e)
-      const conto = await pulsanteConto($, e)
-      if (!conto) return next(e)
-      const { Box } = $.ui.resolve(e)
-      const sotto = await next(e)
-      return (
-        <Box flexDirection="column">
-          {sotto}
-          <Box flexDirection="row">{conto}</Box>
-        </Box>
-      )
+    on('ui.render', { component: 'SessionMode', surface: 'desktop' }, async ($, e, next) => {
+      const etichetta = await etichettaContoDesktop($, e, e.props.modes)
+      return etichetta ?? next(e)
     })
   }
 

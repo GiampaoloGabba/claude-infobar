@@ -38,7 +38,7 @@ In fondo alla seconda riga ci sono i limiti di utilizzo dell'abbonamento: la fin
 
 La seconda riga parte dal contesto: token usati, percentuale della finestra e una barra che diventa gialla oltre il 50% e rossa oltre l'80%. Si aggiorna dopo ogni strumento che Claude usa, quindi la vedi salire anche durante un turno lungo. Al 70% e all'85% arriva un avviso.
 
-Attaccato alla barra c'è lo stato della compattazione, con un simbolo solo. `✓` grigio: non gira niente in background, puoi compattare. `◷ 3` giallo: ci sono 3 lavori ancora attivi (subagent, workflow, Monitor o comandi) e compattare adesso rischia di farteli perdere di vista; `/compatta` ti dice quali sono. `…` grigio: Claude sta lavorando.
+Attaccato alla barra c'è lo stato della compattazione, con un simbolo solo. `✓` grigio: non gira niente in background, puoi compattare. `◷ 3` giallo: ci sono 3 lavori ancora attivi (subagent, workflow, Monitor o comandi) e compattare adesso rischia di farteli perdere di vista: aspetta che finiscano prima di `/compact`. `…` grigio: Claude sta lavorando.
 
 In fondo compaiono le autorizzazioni attive e, se c'è, l'orario della ripresa automatica.
 
@@ -46,7 +46,6 @@ In fondo compaiono le autorizzazioni attive e, se c'è, l'orario della ripresa a
 
 | Comando | Cosa fa |
 | --- | --- |
-| `/compatta [forza] [istruzioni]` | Compatta solo se non c'è niente in corso. Con `forza` compatta comunque. |
 | `/autorizza [testo]` | Aggiunge un'autorizzazione di sessione. Ci sono scorciatoie per `db`, `prod`, `deploy`, `commit` e `push`. Senza argomenti mostra l'elenco. |
 | `/revoca <n\|tutte>` | Toglie un'autorizzazione, o tutte. |
 | `/autonomo` | Accende o spegne la modalità autonoma: Claude porta a termine il lavoro concordato senza fermarsi a chiedere conferme. |
@@ -102,7 +101,7 @@ Se usi [cswap](https://github.com/realiti4/claude-swap) per tenere più account 
 
 Un clic sul nome, o `/account`, apre il pannello: ogni account con i consumi della finestra di 5 ore e di quella settimanale e il reset dopo `↻`, quello attivo sul profilo principale segnato `ATTIVO`, un avviso dove il login va rifatto e un pulsante **switch** sugli altri. Il pannello si aggiorna ogni 5 minuti finché resta aperto (l'endpoint dei consumi di cswap rifiuta le richieste troppo fitte), `r` lo aggiorna subito.
 
-Lo switch cambia sempre e solo il profilo principale: da una sessione su un profilo dedicato quella sessione resta sul suo account, e la prima riga del pannello lo ricorda. Nell'app desktop, dove il resto della barra non compare, l'account ha una riga sua; l'opzione `account` su `no` la toglie insieme a `/account`. Serve cswap 0.27 o successivo, in `~/.local/bin` o nel `PATH`.
+Lo switch cambia solo il profilo principale, quindi c'è solo lì: su un profilo dedicato il pannello mostra i consumi senza pulsanti, mette in evidenza l'account di quell'istanza e `/account <alias>` non cambia niente. Nell'app desktop, dove il resto della barra non compare, l'account ha una riga sua; l'opzione `account` su `no` la toglie insieme a `/account`. Serve cswap 0.27 o successivo, in `~/.local/bin` o nel `PATH`.
 
 ## Se la barra sparisce
 

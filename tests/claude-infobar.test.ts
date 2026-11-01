@@ -45,17 +45,18 @@ test('le autorizzazioni entrano nel system prompt come sezione di sessione', asy
   expect(mia?.text).toContain('compresa la produzione')
 })
 
-test('/compatta rifiuta mentre gira un workflow in background', async ($, on) => {
+test('un workflow in background compare nella barra come lavoro in corso', async ($, on) => {
+  mock.clock(on)
   on('classic.Stop', () => ({}))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['banda del motore'] }))
   await $.classic.Stop({
     stop_hook_active: false,
     background_tasks: [{ id: 't1', type: 'workflow', status: 'running', description: 'review', name: 'review-changes' }],
   })
 
-  const { text } = await $.command.run(cmd('compatta'))
-
-  expect(text).toContain('Non compatto')
-  expect(text).toContain('1 workflow')
+  const ui = await $.ui.mount({ plugin: 'infobar', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, bodyColumns: 120 } as never })
+  expect(await ui.find({ type: 'Text', text: '◷ 1' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /✓/ })).toBeUndefined()
 })
 
 test('la riga sopra il prompt mostra stato e autorizzazioni', async ($, on) => {
