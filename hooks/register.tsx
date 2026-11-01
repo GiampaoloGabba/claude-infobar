@@ -15,6 +15,7 @@ import {
   pulsanteConto,
 } from './account'
 import { apri } from './apri'
+import { cartellaSessione } from './sessione'
 import { aggiornaCodex, codexDaMostrare } from './codex-uso'
 import { fitRow, imageNumbers, pngSize } from './layout'
 import { type Anteprima, registraLetture } from './letture'
@@ -224,8 +225,6 @@ const RITENTA_MS = [250, 1000, 3000]
 // Decisa in session.start; un ridisegno della riga di suggerimento può chiedere una sincronizzazione prima.
 let fissaAnteprima: (anteprima: Anteprima) => void = () => {}
 const anteprima = new Promise<Anteprima>(resolve => (fissaAnteprima = resolve))
-let trovata: { sessione: string; cartella: string } | undefined
-let radici: string[] | undefined
 // I numeri delle immagini disegnate, così un prompt invariato non tocca né il disco né lo stato;
 // undefined finché il disegno è incompleto o, dopo un reload, sconosciuto.
 let chiaveMostrata: string | undefined
@@ -246,40 +245,9 @@ async function terminaleConImmagini($: EngineInterface): Promise<boolean> {
   return term.includes('kitty') || term.includes('ghostty')
 }
 
-// Claude Code salva ogni incolla in <tmp>/<progetto>/<sessione>/images/<n>.png: <tmp> è %TEMP%\claude
-// su Windows e /tmp/claude-<uid> altrove, salvo CLAUDE_CODE_TMPDIR.
-async function radiciTemp($: EngineInterface): Promise<string[]> {
-  const configurata = await $.env.get('CLAUDE_CODE_TMPDIR')
-  if (configurata) return [normalizzaPercorso(configurata), `${normalizzaPercorso(configurata)}/claude`]
-  if ((await $.env.get('OS')) === 'Windows_NT') {
-    const temp = (await $.env.get('TEMP')) ?? (await $.env.get('TMP'))
-    return temp ? [`${normalizzaPercorso(temp)}/claude`] : []
-  }
-  const uid = await $.process.run(['id', '-u']).then(
-    ({ stdout }) => stdout.trim(),
-    () => '',
-  )
-  return uid ? [`/tmp/claude-${uid}`] : []
-}
-
-// La cartella del progetto prende il nome dalla directory in cui è partita la sessione, che nel frattempo
-// può essere cambiata: prima si prova il nome ricavato da quella attuale, poi si cerca per id di sessione.
 async function cartellaImmagini($: EngineInterface): Promise<string | undefined> {
-  const sessione = await $.session.id()
-  if (trovata?.sessione === sessione) return trovata.cartella
-  radici ??= await radiciTemp($)
-  const progetto = (await $.session.root()).replace(/[^a-zA-Z0-9]/g, '-')
-  for (const radice of radici) {
-    const ipotesi = `${radice}/${progetto}/${sessione}/images`
-    if (await $.fs.exists(ipotesi)) return (trovata = { sessione, cartella: ipotesi }).cartella
-  }
-  for (const radice of radici) {
-    for (const voce of await $.fs.list(radice).catch(() => [])) {
-      const cartella = `${radice}/${voce.name}/${sessione}/images`
-      if (voce.kind === 'dir' && (await $.fs.exists(cartella))) return (trovata = { sessione, cartella }).cartella
-    }
-  }
-  return undefined
+  const sessione = await cartellaSessione($)
+  return sessione && `${sessione}/images`
 }
 
 async function descrivi($: EngineInterface, cartella: string | undefined, n: number): Promise<ImmagineIncollata> {
@@ -447,7 +415,7 @@ export const register: Register = (on, options) => {
   const conAccount = options.account !== 'no'
   const conCodex = options.codex !== 'no'
   if (scelta === 'immagini' || scelta === 'blocchi' || scelta === 'etichette') fissaAnteprima(scelta)
-  registraLetture(on, conAnteprime ? anteprima : null)
+  registraLetture(on, conAnteprime ? anteprima : null, { editor: typeof options.editor === 'string' ? options.editor : undefined })
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'autorizza', description: 'Aggiunge un\'autorizzazione di sessione (alias: db, prod, deploy, commit, push)', argumentHint: '[testo|alias]' })

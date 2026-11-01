@@ -1,7 +1,7 @@
 {
   "name": "infobar",
-  "description": "Una riga sopra il prompt con modello, effort, cartella, branch e contesto, più semaforo di compattazione, ripresa automatica dopo i rate limit, autorizzazioni di sessione che sopravvivono al compact, anteprime delle immagini incollate, link per aprire immagini e documenti dal transcript, account cswap con switch e uso di Codex",
-  "version": "0.7.0",
+  "description": "Una riga sopra il prompt con modello, effort, cartella, branch e contesto, più semaforo di compattazione, ripresa automatica dopo i rate limit, autorizzazioni di sessione che sopravvivono al compact, anteprime delle immagini incollate, link nel transcript per aprire immagini, documenti, codice nell'editor e URL, account cswap con switch e uso di Codex",
+  "version": "0.8.0",
   "author": {
     "name": "Giampaolo Gabba",
     "url": "https://github.com/GiampaoloGabba"
@@ -26,6 +26,13 @@
       "description": "Come disegnare le immagini incollate: auto sceglie immagini (protocollo kitty: kitty, Ghostty, WezTerm) o blocchi (mezzi blocchi colorati, per Windows Terminal e gli altri terminali); etichette mostra solo i tag cliccabili; no le spegne",
       "default": "auto",
       "options": ["auto", "immagini", "blocchi", "etichette", "no"]
+    },
+    "editor": {
+      "type": "string",
+      "title": "Editor",
+      "description": "Dove aprire i file di codice che Claude scrive o modifica, dal link sotto la riga del tool: auto usa l'IDE del terminale (Rider, VS Code), altrimenti Rider per i file .NET e VS Code per il resto, tra quelli installati; no toglie il link",
+      "default": "auto",
+      "options": ["auto", "rider", "code", "cursor", "no"]
     },
     "account": {
       "type": "string",

@@ -95,7 +95,7 @@ Per i blocchi la mod decodifica il PNG da sola, in TypeScript (le mod non hanno 
 
 Il tag nel prompt non si può rinominare con il nome del file: `[Image #n]` è il modo in cui Claude Code collega l'allegato, e il nome del file si conosce solo quando il prompt viene inviato.
 
-## Immagini e markdown nel transcript
+## Link nel transcript
 
 Quando Claude legge un'immagine con `Read` (uno screenshot che ha appena fatto, per esempio), sotto la riga del transcript compare `↗ apri <nome file>` in azzurro: un clic la apre nel visualizzatore di sistema, con il file com'è adesso. Vale sia per la riga raggruppata (`Read 1 file, ran 2 shell commands`), chiusa o aperta, sia per una lettura da sola. Solo nel terminale: l'app desktop le mostra già a modo suo.
 
@@ -107,6 +107,10 @@ Lo stesso link compare sotto i documenti che Claude produce, e li apre il progra
 - **prodotti da un comando** (Bash o PowerShell, per esempio uno script che genera un report): PDF, Word, Excel, PowerPoint, OpenDocument, `.rtf`, `.epub` e i formati di testo sopra. La mod cerca nel comando i percorsi con quelle estensioni e mostra il link solo se il file esiste ed è stato scritto mentre il comando girava: un `cat` di un PDF vecchio non fa comparire niente. Un file che il comando crea senza nominarlo (come `soffice --convert-to pdf`, che decide da sé il nome) resta senza link, e così i comandi lanciati in background.
 
 Le letture di documenti no: Claude rilegge CLAUDE.md e README di continuo e i link sarebbero solo rumore. Questi link non dipendono da `anteprime`.
+
+Sotto `Write` ed `Edit` di un file di codice il link apre l'editor sulla prima riga cambiata: `↗ Rider Program.cs:42`, `↗ VS Code app.ts:7`. L'opzione `editor` (in `/config`) sceglie quale: `auto`, il predefinito, usa l'IDE in cui gira il terminale (quello integrato di Rider o di VS Code); fuori da un IDE Rider per i file .NET (`.cs`, `.razor`, `.csproj`, `.xaml`, ...) e VS Code per il resto, tra quelli installati. `rider`, `code` e `cursor` lo fissano, `no` toglie il link. L'editor va lanciato da riga di comando (`rider`, `code`, `cursor` nel `PATH`: per Rider lo script di JetBrains Toolbox).
+
+Sotto un comando compaiono anche gli URL del suo output, fino a tre: `↗ apri localhost:5173` dopo l'avvio di un server, `↗ apri PR #42` o `↗ apri nuova PR` dopo un `gh pr create` o un `git push`. Si aprono nel browser predefinito. Gli URL già scritti nel comando non contano, così un `curl` non fa comparire niente. Un comando lanciato in background, come un server di sviluppo, stampa l'indirizzo dopo: la mod guarda il suo file di output per due minuti e il link compare appena arriva.
 
 ## Codex
 

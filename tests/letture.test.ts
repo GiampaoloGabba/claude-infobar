@@ -44,7 +44,7 @@ function ospite(on: On) {
 
 test('solo le letture riuscite di immagini hanno un\'anteprima', () => {
   expect(daAprire(lettura('a', { ...PNG, dimensions: { displayWidth: 1600, displayHeight: 1160 } }))).toEqual([
-    { id: 'a', path: PATH, png: ROSSO_SU_BLU, size: { width: 1600, height: 1160 } },
+    { id: 'a', tipo: 'file', destinazione: PATH, png: ROSSO_SU_BLU, size: { width: 1600, height: 1160 } },
   ])
   expect(daAprire(lettura('b', PNG))[0]?.size).toEqual({ width: 40, height: 20 })
   expect(daAprire(lettura('c', { base64: '/9j/4AAQ', type: 'image/jpeg', originalSize: 9 }))).toMatchObject([{ id: 'c', png: null }])
@@ -109,11 +109,15 @@ function scrittura(tool: 'Write' | 'Edit', id: string, path: string) {
   return { tool_use_id: id, tool, input: { file_path: path }, output: { filePath: path }, isErrored: false }
 }
 
-test('i documenti scritti o modificati si aprono, quelli letti e il codice no', () => {
-  expect(daAprire(scrittura('Write', 'w', 'E:/repo/docs/piano.md'))).toEqual([{ id: 'w', path: 'E:/repo/docs/piano.md', png: null, size: null }])
-  expect(daAprire(scrittura('Edit', 'e', 'E:/repo/README.MARKDOWN'))[0]?.path).toBe('E:/repo/README.MARKDOWN')
-  expect(daAprire(scrittura('Write', 't', 'V:/Temp/dati.csv'))[0]?.path).toBe('V:/Temp/dati.csv')
-  expect(daAprire(scrittura('Edit', 'x', 'E:/repo/src/app.ts'))).toEqual([])
+test('i documenti scritti o modificati si aprono col sistema, il codice nell\'editor, le letture di documenti no', () => {
+  expect(daAprire(scrittura('Write', 'w', 'E:/repo/docs/piano.md'))).toEqual([
+    { id: 'w', tipo: 'file', destinazione: 'E:/repo/docs/piano.md', png: null, size: null },
+  ])
+  expect(daAprire(scrittura('Edit', 'e', 'E:/repo/README.MARKDOWN'))[0]).toMatchObject({ tipo: 'file', destinazione: 'E:/repo/README.MARKDOWN' })
+  expect(daAprire(scrittura('Write', 't', 'V:/Temp/dati.csv'))[0]).toMatchObject({ tipo: 'file', destinazione: 'V:/Temp/dati.csv' })
+  expect(daAprire(scrittura('Edit', 'x', 'E:/repo/src/app.ts'))).toEqual([
+    { id: 'x', tipo: 'editor', destinazione: 'E:/repo/src/app.ts', riga: 1, png: null, size: null },
+  ])
   expect(daAprire({ ...scrittura('Edit', 'f', 'E:/repo/piano.md'), isErrored: true })).toEqual([])
   expect(daAprire({ ...scrittura('Write', 'r', 'E:/repo/piano.md'), output: undefined })).toEqual([])
   expect(daAprire({ ...lettura('m', PNG, 'E:/repo/CLAUDE.md'), output: { type: 'text', file: { content: '# x' } } })).toEqual([])
