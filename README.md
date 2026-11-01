@@ -51,6 +51,7 @@ In fondo compaiono le autorizzazioni attive e, se c'è, l'orario della ripresa a
 | `/revoca <n\|tutte>` | Toglie un'autorizzazione, o tutte. |
 | `/autonomo` | Accende o spegne la modalità autonoma: Claude porta a termine il lavoro concordato senza fermarsi a chiedere conferme. |
 | `/ripresa [annulla]` | Mostra la ripresa automatica programmata, o la annulla. |
+| `/account [alias\|numero]` | Apre il pannello degli account di cswap; con un alias o un numero fa lo switch del profilo principale. |
 
 ## Autorizzazioni che restano dopo il compact
 
@@ -94,6 +95,14 @@ Come si comportano i terminali:
 Per i blocchi la mod decodifica il PNG da sola, in TypeScript (le mod non hanno zlib). Uno screenshot normale richiede qualche decina di millisecondi, uno 4K quasi un secondo, una volta sola per ogni incolla. I PNG oltre 4 MiB (il massimo che una mod può leggere) e quelli interlacciati restano senza miniatura a blocchi: compare `[Image #n]`, ma `apri` funziona lo stesso.
 
 Il tag nel prompt non si può rinominare con il nome del file: `[Image #n]` è il modo in cui Claude Code collega l'allegato, e il nome del file si conosce solo quando il prompt viene inviato.
+
+## Account (cswap)
+
+Se usi [cswap](https://github.com/realiti4/claude-swap) per tenere più account Claude sullo stesso computer, la prima riga parte dall'account della sessione: `mini ▾` in verde sul profilo principale `~/.claude`, `canevari ⚑` in magenta su un profilo dedicato (`CLAUDE_CONFIG_DIR=~/.claude-canevari`, che ha un login suo e non segue cswap). Il nome è l'alias che gli dai in cswap, letto dai file locali senza chiamare la rete; su un profilo dedicato senza cswap compare il nome della cartella.
+
+Un clic sul nome, o `/account`, apre il pannello: ogni account con i consumi della finestra di 5 ore e di quella settimanale e il reset dopo `↻`, quello attivo sul profilo principale segnato `ATTIVO`, un avviso dove il login va rifatto e un pulsante **switch** sugli altri. Il pannello si aggiorna ogni 5 minuti finché resta aperto (l'endpoint dei consumi di cswap rifiuta le richieste troppo fitte), `r` lo aggiorna subito.
+
+Lo switch cambia sempre e solo il profilo principale: da una sessione su un profilo dedicato quella sessione resta sul suo account, e la prima riga del pannello lo ricorda. Nell'app desktop, dove il resto della barra non compare, l'account ha una riga sua; l'opzione `account` su `no` la toglie insieme a `/account`. Serve cswap 0.27 o successivo, in `~/.local/bin` o nel `PATH`.
 
 ## Se la barra sparisce
 

@@ -2,6 +2,17 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, RenderInput, Register, SessionContextUsage, SessionRateLimit, Timer } from 'claude-code'
 
 import type { Attivita, ImmagineIncollata, Ripresa } from '../types'
+import {
+  PANNELLO_CONTI,
+  aggiornaContiSeVecchi,
+  aggiornaContoSessione,
+  apriConti,
+  conCswap,
+  disegnaConti,
+  pannelloAperto,
+  passaA,
+  pulsanteConto,
+} from './account'
 import { fitRow, imageNumbers, pngSize } from './layout'
 import { decodeThumbnail } from './png'
 import { fromBase64, rasterCells, toBase64 } from './raster'
@@ -445,6 +456,7 @@ async function rigaImmagini($: EngineInterface, e: RenderInput<'AbovePrompt'>, s
 export const register: Register = (on, options) => {
   const scelta = options.anteprime
   const conAnteprime = scelta !== 'no'
+  const conAccount = options.account !== 'no'
   if (scelta === 'immagini' || scelta === 'blocchi' || scelta === 'etichette') fissaAnteprima(scelta)
 
   on('session.start', async ($, e, next) => {
@@ -453,6 +465,14 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'revoca', description: 'Revoca un\'autorizzazione di sessione', argumentHint: '<n|tutte>' })
     await $.command.register({ name: 'autonomo', description: 'Attiva o disattiva la modalità autonoma di sessione' })
     await $.command.register({ name: 'ripresa', description: 'Stato della ripresa automatica dopo un limite', argumentHint: '[annulla]', immediate: true })
+    if (conAccount) {
+      await $.command.register({ name: 'account', description: 'Account cswap: senza argomenti apre il pannello, con alias o numero fa lo switch del profilo principale', argumentHint: '[alias|numero]' })
+      await aggiornaContoSessione($)
+      $.clock.every(60_000, () => {
+        void aggiornaContoSessione($)
+        void pannelloAperto($).then(aperto => (aperto ? aggiornaContiSeVecchi($) : undefined))
+      })
+    }
     const dir = nomeCartella(await $.session.cwd())
     if ((await read($, cartella)) !== dir) await update($, cartella, () => dir)
     fileHead = await trovaHead($)
@@ -655,6 +675,34 @@ export const register: Register = (on, options) => {
     return { text: r ? `Ripresa automatica alle ${orario(r.at)} (${r.motivo}, tentativo ${r.tentativi}/${MAX_TENTATIVI}).` : 'Nessuna ripresa programmata.' }
   })
 
+  on('command.run', { command: 'account' }, async ($, e) => {
+    if (!(await conCswap($))) return { text: 'cswap non è installato: il pannello account mostra solo i suoi account.' }
+    const destinazione = e.args.trim()
+    if (destinazione) return { text: await passaA($, destinazione) }
+    await apriConti($)
+    return { text: 'Pannello account aperto.' }
+  }).catch(() => ({ text: 'Comando /account non riuscito: vedi il log di debug.' }))
+
+  on('ui.render', { component: 'Pane', requestId: PANNELLO_CONTI }, async ($, e) => disegnaConti($, e))
+
+  // Sul desktop il resto della barra non serve (l'app mostra già quelle informazioni), l'account sì. Con
+  // account "no" l'hook non si registra: il desktop riserva la banda a ogni plugin che la aggancia.
+  if (conAccount) {
+    on('ui.render', { component: 'AbovePrompt', surface: 'desktop' }, async ($, e, next) => {
+      if (e.props.hasSurvey) return next(e)
+      const conto = await pulsanteConto($, e)
+      if (!conto) return next(e)
+      const { Box } = $.ui.resolve(e)
+      const sotto = await next(e)
+      return (
+        <Box flexDirection="column">
+          {sotto}
+          <Box flexDirection="row">{conto}</Box>
+        </Box>
+      )
+    })
+  }
+
   // Sul desktop l'app mostra già queste informazioni a modo suo: la barra è solo per il terminale. Il filtro
   // sta nel matcher e non nel corpo, perché il desktop riserva lo spazio della banda a ogni plugin che la aggancia.
   on('ui.render', { component: 'AbovePrompt', surface: 'terminal' }, async ($, e, next) => {
@@ -681,12 +729,15 @@ export const register: Register = (on, options) => {
     // Le miniature le disegna infobar stesso: un Button arrivato da next(e) dentro l'albero di un
     // altro plugin non riceve i clic (Claude Code 2.1.288).
     const miniature = await rigaImmagini($, e, scelta === 'etichette')
+    const conto = conAccount ? await pulsanteConto($, e) : null
 
     return (
       <Box flexDirection="column">
         {miniature}
         {sotto}
         <Box flexDirection="row">
+          {conto}
+          {conto && nome ? <Text dimColor>{' | '}</Text> : null}
           {nome ? <Text bold color={coloreModello(nome)}>{nome}</Text> : null}
           {livello ? <Text color={coloreEffort(livello)}>{` ${livello}`}</Text> : null}
           {dir ? <Text dimColor>{' | '}</Text> : null}

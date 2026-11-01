@@ -17,6 +17,29 @@ export type ImmagineIncollata = {
   thumbnail?: { width: number; height: number; rgba: string } | null
 }
 
+export type FinestraConto = { pct: number; clock: string }
+
+export type Conto = {
+  numero: number
+  nome: string
+  attivo: boolean
+  /** `usageStatus` di cswap: `ok`, `relogin_required`, `token_expired`, ... */
+  stato: string
+  cinqueOre: FinestraConto | null
+  settimana: FinestraConto | null
+}
+
+export type StatoConti = {
+  conti: Conto[]
+  aggiornatiAlle: number
+  errore: string | null
+  /** Cosa sta facendo cswap adesso; null se è fermo. */
+  occupato: string | null
+}
+
+/** L'account mostrato nella barra: `fisso` se la sessione gira su un profilo CLAUDE_CONFIG_DIR dedicato. */
+export type ContoSessione = { nome: string; fisso: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
     'infobar': {
@@ -38,6 +61,8 @@ declare module 'claude-code' {
       limitiVistiAlle: number | null
       autorizzazioni: string[]
       immagini: ImmagineIncollata[]
+      conti: StatoConti
+      contoSessione: ContoSessione | null
     }
   }
 }
