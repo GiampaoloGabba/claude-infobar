@@ -95,6 +95,19 @@ Per i blocchi la mod decodifica il PNG da sola, in TypeScript (le mod non hanno 
 
 Il tag nel prompt non si può rinominare con il nome del file: `[Image #n]` è il modo in cui Claude Code collega l'allegato, e il nome del file si conosce solo quando il prompt viene inviato.
 
+## Immagini e markdown nel transcript
+
+Quando Claude legge un'immagine con `Read` (uno screenshot che ha appena fatto, per esempio), sotto la riga del transcript compare `↗ apri <nome file>` in azzurro: un clic la apre nel visualizzatore di sistema, con il file com'è adesso. Vale sia per la riga raggruppata (`Read 1 file, ran 2 shell commands`), chiusa o aperta, sia per una lettura da sola. Solo nel terminale: l'app desktop le mostra già a modo suo.
+
+Nei terminali che disegnano immagini vere (`anteprime: immagini`, quindi kitty, Ghostty, WezTerm) sopra il link c'è anche il PNG che ha visto Claude. Altrove niente miniatura a blocchi: a quella risoluzione uno screenshot non si legge, e nel transcript occuperebbe solo righe. `anteprime: no` spegne anche il link.
+
+Lo stesso link compare sotto i documenti che Claude produce, e li apre il programma che il sistema associa a quel tipo di file:
+
+- **scritti con `Write` o `Edit`**: `.md`, `.txt`, `.csv`, `.tsv`, `.html`, `.svg`. Il codice no, quello si guarda nell'editor.
+- **prodotti da un comando** (Bash o PowerShell, per esempio uno script che genera un report): PDF, Word, Excel, PowerPoint, OpenDocument, `.rtf`, `.epub` e i formati di testo sopra. La mod cerca nel comando i percorsi con quelle estensioni e mostra il link solo se il file esiste ed è stato scritto mentre il comando girava: un `cat` di un PDF vecchio non fa comparire niente. Un file che il comando crea senza nominarlo (come `soffice --convert-to pdf`, che decide da sé il nome) resta senza link, e così i comandi lanciati in background.
+
+Le letture di documenti no: Claude rilegge CLAUDE.md e README di continuo e i link sarebbero solo rumore. Questi link non dipendono da `anteprime`.
+
 ## Codex
 
 Se usi anche Codex, in fondo alla seconda riga c'è il suo piano: `codex 12% 6g`, la percentuale usata e il tempo al reset, con l'etichetta della finestra (`5h`, `7d`) solo quando il piano ne ha più di una. Il dato è dell'account, quindi comprende anche l'uso fatto da altri computer o dal web.

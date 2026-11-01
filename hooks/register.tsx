@@ -14,8 +14,10 @@ import {
   passaA,
   pulsanteConto,
 } from './account'
+import { apri } from './apri'
 import { aggiornaCodex, codexDaMostrare } from './codex-uso'
 import { fitRow, imageNumbers, pngSize } from './layout'
+import { type Anteprima, registraLetture } from './letture'
 import { decodeThumbnail } from './png'
 import { fromBase64, rasterCells, toBase64 } from './raster'
 import {
@@ -219,8 +221,6 @@ const LATO_MINIATURA = 64
 // Un'immagine citata nel prompt ma non ancora su disco si cerca di nuovo a questi intervalli, poi si lascia stare.
 const RITENTA_MS = [250, 1000, 3000]
 
-type Anteprima = 'immagini' | 'blocchi' | 'etichette'
-
 // Decisa in session.start; un ridisegno della riga di suggerimento può chiedere una sincronizzazione prima.
 let fissaAnteprima: (anteprima: Anteprima) => void = () => {}
 const anteprima = new Promise<Anteprima>(resolve => (fissaAnteprima = resolve))
@@ -359,20 +359,6 @@ function sincronizza($: EngineInterface, bozza: string, ritenta = false) {
   })
 }
 
-async function comandoApertura($: EngineInterface, path: string): Promise<string[]> {
-  if ((await $.env.get('OS')) === 'Windows_NT') return ['explorer.exe', path.replaceAll('/', '\\')]
-  const { stdout } = await $.process.run(['uname', '-s'])
-  return [stdout.trim() === 'Darwin' ? 'open' : 'xdg-open', path]
-}
-
-// Apre l'immagine con il visualizzatore predefinito; explorer.exe esce con 1 anche quando l'ha aperta.
-async function apri($: EngineInterface, path: string) {
-  const esito = await comandoApertura($, path)
-    .then(argv => $.process.run(argv))
-    .catch((errore: unknown) => errore)
-  if (esito instanceof Error) $.ui.toast(`Non riesco ad aprire ${path}: ${esito.message}`)
-}
-
 /** La riga di miniature (o di sole etichette) sopra la barra, o null quando nel prompt non ci sono immagini. */
 async function rigaImmagini($: EngineInterface, e: RenderInput<'AbovePrompt'>, soloEtichette: boolean) {
   if (e.surface !== 'terminal') return null
@@ -461,6 +447,7 @@ export const register: Register = (on, options) => {
   const conAccount = options.account !== 'no'
   const conCodex = options.codex !== 'no'
   if (scelta === 'immagini' || scelta === 'blocchi' || scelta === 'etichette') fissaAnteprima(scelta)
+  registraLetture(on, conAnteprime ? anteprima : null)
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'autorizza', description: 'Aggiunge un\'autorizzazione di sessione (alias: db, prod, deploy, commit, push)', argumentHint: '[testo|alias]' })
