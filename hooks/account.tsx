@@ -33,6 +33,18 @@ export async function conCswap($: EngineInterface) {
   return (await trovaPercorsi($)).cswap !== null
 }
 
+// L'app desktop (e ogni host che fa lo stesso) passa alla sessione il token del proprio login: quella sessione
+// non usa ~/.claude, quindi né l'alias letto da lì né lo switch di cswap la riguardano.
+export async function loginProprio($: EngineInterface) {
+  const valori = [
+    await $.env.get('CLAUDE_CODE_OAUTH_TOKEN'),
+    await $.env.get('CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR'),
+    await $.env.get('ANTHROPIC_API_KEY'),
+    await $.env.get('ANTHROPIC_AUTH_TOKEN'),
+  ]
+  return valori.some(v => Boolean(v?.trim()))
+}
+
 /** Ricava l'account della sessione dai file locali, senza chiamare cswap né la rete. */
 async function calcolaContoSessione($: EngineInterface): Promise<ContoSessione | null> {
   const p = await trovaPercorsi($)
@@ -142,60 +154,9 @@ const etichettaEvidenza = (sessione: ContoSessione | null) => (sessione?.fisso ?
 const testoAggiornamento = (s: StatoConti) =>
   s.occupato ?? (s.aggiornatiAlle ? `aggiornato alle ${oraMinuti(s.aggiornatiAlle)}` : '')
 
-const TEMA_LIVELLO: Record<string, 'success' | 'warning' | 'error'> = { green: 'success', yellow: 'warning', red: 'error' }
-
-// Il desktop disegna testi proporzionali, pulsanti veri e colori del tema: la versione a caratteri del
-// terminale lì sembra una schermata incollata.
-function disegnaContiDesktop($: EngineInterface, e: RenderInput, s: StatoConti, sessione: ContoSessione | null) {
-  const { Box, Text, Button } = $.ui.resolve(e)
-
-  const uso = (etichetta: string, f: FinestraConto | null) =>
-    f ? (
-      <Text size="footnote" color="subtle">
-        {`${etichetta} `}
-        <Text weight="semibold" color={TEMA_LIVELLO[coloreLivello(f.pct)]}>{`${f.pct}%`}</Text>
-        {f.clock ? ` · reset ${f.clock}` : ''}
-      </Text>
-    ) : null
-
-  return (
-    <Box flexDirection="column" gap="md" padding="sm">
-      <Text size="footnote" color="subtle">{testoQui(sessione)}</Text>
-      {s.conti.length === 0 && !s.errore && <Text color="subtle">Nessun dato ancora.</Text>}
-      {s.conti.map(c => (
-        <Box key={`conto-${c.numero}`} flexDirection="column" gap="xs">
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center">
-            <Box flexDirection="row" gap="sm" alignItems="center">
-              <Text weight={evidenziato(c, sessione) ? 'semibold' : 'regular'} color={evidenziato(c, sessione) ? 'success' : undefined}>{c.nome}</Text>
-              {evidenziato(c, sessione) && <Text size="caption" weight="semibold" color="success">{etichettaEvidenza(sessione)}</Text>}
-            </Box>
-            {!c.attivo && !sessione?.fisso && (
-              <Button key={`switch-${c.numero}`} variant="secondary" label="Switch" onPress={() => void passaA($, String(c.numero))} />
-            )}
-          </Box>
-          {c.stato === 'ok' ? (
-            <Box flexDirection="row" gap="md">
-              {uso('5h', c.cinqueOre)}
-              {uso('7d', c.settimana)}
-            </Box>
-          ) : (
-            <Text size="footnote" color="warning">{STATO_CONTO[c.stato] ?? c.stato}</Text>
-          )}
-        </Box>
-      ))}
-      {s.errore && <Text size="footnote" color="error">{`Errore: ${s.errore}`}</Text>}
-      <Box flexDirection="row" gap="sm" alignItems="center">
-        <Button key="aggiorna-conti" hotkey="r" label="Aggiorna" onPress={() => void aggiornaConti($)} />
-        <Text size="caption" color="subtle">{testoAggiornamento(s)}</Text>
-      </Box>
-    </Box>
-  )
-}
-
 export async function disegnaConti($: EngineInterface, e: RenderInput) {
   const s = await read($, conti)
   const sessione = await contoDaMostrare($)
-  if (e.surface !== 'terminal') return disegnaContiDesktop($, e, s, sessione)
   const { Box, Text, Button } = $.ui.resolve(e)
 
   const uso = (etichetta: string, f: FinestraConto | null) =>
@@ -241,21 +202,6 @@ export async function disegnaConti($: EngineInterface, e: RenderInput) {
         <Button key="aggiorna-conti" hotkey="r" label="aggiorna" onPress={() => void aggiornaConti($)} />
         <Text dimColor>{`  ${testoAggiornamento(s)}`}</Text>
       </Box>
-    </Box>
-  )
-}
-
-/** L'account tra le etichette tenui a destra sotto il prompt del desktop, al posto di una riga in più. */
-export async function etichettaContoDesktop($: EngineInterface, e: RenderInput, modi: readonly string[]) {
-  const sessione = await contoDaMostrare($)
-  if (!sessione) return null
-  const { Box, Text, Button } = $.ui.resolve(e)
-  return (
-    <Box flexDirection="row" gap="sm" alignItems="center">
-      {modi.length ? <Text size="caption" color="subtle">{modi.join(' & ')}</Text> : null}
-      <Button key="conto" plain dimColor onPress={() => void apriConti($)}>
-        <Text size="caption">{`${sessione.nome}${sessione.fisso ? ' ⚑' : ' ▾'}`}</Text>
-      </Button>
     </Box>
   )
 }

@@ -9,7 +9,7 @@ import {
   apriConti,
   conCswap,
   disegnaConti,
-  etichettaContoDesktop,
+  loginProprio,
   pannelloAperto,
   passaA,
   pulsanteConto,
@@ -465,7 +465,7 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'revoca', description: 'Revoca un\'autorizzazione di sessione', argumentHint: '<n|tutte>' })
     await $.command.register({ name: 'autonomo', description: 'Attiva o disattiva la modalità autonoma di sessione' })
     await $.command.register({ name: 'ripresa', description: 'Stato della ripresa automatica dopo un limite', argumentHint: '[annulla]', immediate: true })
-    if (conAccount) {
+    if (conAccount && !(await loginProprio($))) {
       await $.command.register({ name: 'account', description: 'Account cswap: senza argomenti apre il pannello, con alias o numero fa lo switch del profilo principale', argumentHint: '[alias|numero]' })
       await aggiornaContoSessione($)
       $.clock.every(60_000, () => {
@@ -663,6 +663,7 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'account' }, async ($, e) => {
+    if (await loginProprio($)) return { text: "Questa sessione usa il login dell'app che l'ha avviata, non ~/.claude: cswap non la riguarda." }
     if (!(await conCswap($))) return { text: 'cswap non è installato: il pannello account mostra solo i suoi account.' }
     const destinazione = e.args.trim()
     if (destinazione) return { text: await passaA($, destinazione) }
@@ -671,14 +672,6 @@ export const register: Register = (on, options) => {
   }).catch(() => ({ text: 'Comando /account non riuscito: vedi il log di debug.' }))
 
   on('ui.render', { component: 'Pane', requestId: PANNELLO_CONTI }, async ($, e) => disegnaConti($, e))
-
-  // Sul desktop l'account sta tra le etichette sotto il prompt: una riga sopra il prompt costerebbe una banda intera.
-  if (conAccount) {
-    on('ui.render', { component: 'SessionMode', surface: 'desktop' }, async ($, e, next) => {
-      const etichetta = await etichettaContoDesktop($, e, e.props.modes)
-      return etichetta ?? next(e)
-    })
-  }
 
   // Sul desktop l'app mostra già queste informazioni a modo suo: la barra è solo per il terminale. Il filtro
   // sta nel matcher e non nel corpo, perché il desktop riserva lo spazio della banda a ogni plugin che la aggancia.

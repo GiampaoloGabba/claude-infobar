@@ -1,7 +1,7 @@
 {
   "name": "infobar",
   "description": "Una riga sopra il prompt con modello, effort, cartella, branch e contesto, più semaforo di compattazione, ripresa automatica dopo i rate limit, autorizzazioni di sessione che sopravvivono al compact, anteprime delle immagini incollate e account cswap con switch",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "author": {
     "name": "Giampaolo Gabba",
     "url": "https://github.com/GiampaoloGabba"
@@ -30,7 +30,7 @@
     "account": {
       "type": "string",
       "title": "Account",
-      "description": "Account della sessione nella barra, cliccabile per il pannello con consumi e switch di cswap: auto lo mostra (anche nell'app desktop, su una riga sua); no lo spegne e toglie /account",
+      "description": "Account della sessione nella barra, cliccabile per il pannello con consumi e switch di cswap: auto lo mostra; no lo spegne e toglie /account. Non compare dove la sessione ha un login suo, come nell'app desktop",
       "default": "auto",
       "options": ["auto", "no"]
     }

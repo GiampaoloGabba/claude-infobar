@@ -101,7 +101,7 @@ Se usi [cswap](https://github.com/realiti4/claude-swap) per tenere più account 
 
 Un clic sul nome, o `/account`, apre il pannello: ogni account con i consumi della finestra di 5 ore e di quella settimanale e il reset dopo `↻`, quello attivo sul profilo principale segnato `ATTIVO`, un avviso dove il login va rifatto e un pulsante **switch** sugli altri. Il pannello si aggiorna ogni 5 minuti finché resta aperto (l'endpoint dei consumi di cswap rifiuta le richieste troppo fitte), `r` lo aggiorna subito.
 
-Lo switch cambia solo il profilo principale, quindi c'è solo lì: su un profilo dedicato il pannello mostra i consumi senza pulsanti, mette in evidenza l'account di quell'istanza e `/account <alias>` non cambia niente. Nell'app desktop, dove il resto della barra non compare, l'account ha una riga sua; l'opzione `account` su `no` la toglie insieme a `/account`. Serve cswap 0.27 o successivo, in `~/.local/bin` o nel `PATH`.
+Lo switch cambia solo il profilo principale, quindi c'è solo lì: su un profilo dedicato il pannello mostra i consumi senza pulsanti, mette in evidenza l'account di quell'istanza e `/account <alias>` non cambia niente. Dove la sessione ha un login suo, come nell'app desktop che le passa il proprio token, l'account e `/account` non compaiono: cswap non la riguarda. L'opzione `account` su `no` toglie tutto. Serve cswap 0.27 o successivo, in `~/.local/bin` o nel `PATH`.
 
 ## Se la barra sparisce
 

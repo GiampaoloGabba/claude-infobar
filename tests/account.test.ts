@@ -55,17 +55,9 @@ function ospite(on: On, env: Record<string, string>) {
   return { comandi, aperti }
 }
 
-const ETICHETTE = {
-  plugin: 'infobar',
-  surface: 'desktop',
-  component: 'SessionMode',
-  viewport: { columns: 120, rows: 40 },
-  props: { modes: ['focus'] },
-} as const
-
 const PANNELLO = {
   plugin: 'infobar',
-  surface: 'desktop',
+  surface: 'terminal',
   component: 'Pane',
   requestId: 'account',
   viewport: { columns: 60, rows: 40 },
@@ -79,35 +71,19 @@ const PANNELLO = {
   },
 } as const
 
-test("sul desktop l'account sta tra le etichette sotto il prompt e il clic apre il pannello", async ($, on) => {
+const account = (args: string) => ({ command: 'account', args, origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 120 } })
+
+test("su un'istanza con nome il pannello evidenzia il suo account, non ha switch e /account non cambia niente", async ($, on) => {
   mock.clock(on)
-  const o = ospite(on, {})
-
-  const ui = await $.ui.mount(ETICHETTE)
-  expect((await ui.find({ key: 'conto' }))?.text).toBe('mini ▾')
-  expect(await ui.find({ text: 'focus' })).toBeDefined()
-
-  await ui.press({ key: 'conto' })
-  expect(o.aperti).toEqual(['account'])
-})
-
-test('su un profilo dedicato compare il suo alias, segnato come fisso', async ($, on) => {
-  ospite(on, { CLAUDE_CONFIG_DIR: 'C:\\Users\\g\\.claude-canevari' })
-
-  const ui = await $.ui.mount(ETICHETTE)
-  expect((await ui.find({ key: 'conto' }))?.text).toBe('canevari ⚑')
-})
-
-test("su un'istanza con nome il pannello non ha switch e /account non cambia account", async ($, on) => {
-  mock.clock(on)
-  const o = ospite(on, { CLAUDE_CONFIG_DIR: 'C:\Users\g\.claude-canevari' })
+  const o = ospite(on, { CLAUDE_CONFIG_DIR: String.raw`C:\Users\g\.claude-canevari` })
 
   const ui = await $.ui.mount(PANNELLO)
   await ui.press({ key: 'aggiorna-conti' })
+  expect(await ui.find({ text: /^Istanza canevari:/ })).toBeDefined()
   expect(await ui.find({ text: 'login da rifare' })).toBeDefined()
-  expect(await ui.findAll({ type: 'Button', text: 'Switch' })).toHaveLength(0)
+  expect(await ui.findAll({ type: 'Button', text: 'switch' })).toHaveLength(0)
 
-  const { text } = await $.command.run({ command: 'account', args: 'personal', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
+  const { text } = await $.command.run(account('personal'))
   expect(text).toContain('account è fisso')
   expect(o.comandi.some(c => c.argv[1] === 'switch')).toBe(false)
 })
@@ -123,4 +99,14 @@ test('sul principale lo switch lancia cswap con CLAUDE_CONFIG_DIR vuota', async 
   await ui.press({ key: 'switch-1' })
   const switch1 = o.comandi.find(c => c.argv[1] === 'switch')
   expect(switch1).toEqual({ argv: [CSWAP, 'switch', '1'], env: { CLAUDE_CONFIG_DIR: '' } })
+})
+
+test("una sessione con il login dell'app che l'ha avviata non apre il pannello e non fa switch", async ($, on) => {
+  mock.clock(on)
+  const o = ospite(on, { CLAUDE_CODE_OAUTH_TOKEN: 'tok' })
+
+  const { text } = await $.command.run(account('personal'))
+  expect(text).toContain('login')
+  expect(o.aperti).toEqual([])
+  expect(o.comandi).toEqual([])
 })
