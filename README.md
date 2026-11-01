@@ -4,7 +4,7 @@ Una mod per Claude Code che tiene sopra il prompt le cose che guardo di continuo
 
 ```
 Opus 5.5 medium | mio-progetto (main)
-◐ 228.3k 23% ██░░░░░░░░ ✓ | autonomo | ripresa 00:31 annulla | 5h 20% ↻ 2h 40m | 7d 58% ↻ 1g 7h
+◐ 228.3k 23% ██░░░░░░░░ ✓ | autonomo | ripresa 00:31 annulla | 5h 20% 2h 40m | 7d 58% 1g 7h | codex 12% 6g
 ```
 
 L'ho scritta perché passavo metà del tempo a chiedere a Claude "posso compattarti?" e l'altra metà a ripetergli autorizzazioni che gli avevo già dato prima del compact. Gira su Windows, macOS e Linux e non ha bisogno di bash, jq o script esterni.
@@ -30,11 +30,11 @@ Se hai una statusline che mostra modello, branch e contesto, puoi toglierla: la 
 
 ## Cosa si vede
 
-La prima riga ha modello, effort, cartella e branch git (anche dentro un worktree). Il modello è colorato per famiglia, Opus blu, Sonnet arancio, Haiku verde; l'effort va dal verde di `low` al rosso di `max`. All'avvio l'effort viene letto dalle impostazioni (`effortLevel`, o quello del modello in `modelSettings`), poi si aggiorna a ogni turno e con `/effort`. Dopo `/compact`, `/clear` o una ripresa la barra si rilegge subito. Prima della prima risposta il contesto è una stima fatta come `/context` (in una sessione ripresa è il valore esatto), e i limiti di utilizzo sono gli ultimi visti su questo computer, in grigio e con l'età (`5h 33% · 2h fa`) finché la prima risposta non porta quelli aggiornati; le finestre già azzerate non compaiono. Se usi Claude anche altrove (altri computer, claude.ai), quei valori grigi possono essere più bassi del reale.
+La prima riga ha modello, effort, cartella e branch git (anche dentro un worktree). Il modello è colorato per famiglia, Opus blu, Sonnet arancio, Haiku verde; l'effort va dal verde di `low` al rosso di `max`. All'avvio l'effort viene letto dalle impostazioni (`effortLevel`, o quello del modello in `modelSettings`), poi si aggiorna a ogni turno e con `/effort`. Dopo `/compact`, `/clear` o una ripresa la barra si rilegge subito. Prima della prima risposta il contesto è una stima fatta come `/context` (in una sessione ripresa è il valore esatto), e i limiti di utilizzo sono gli ultimi visti su questo computer, con l'età in fondo (`5h 33% · 2h fa`) finché la prima risposta non porta quelli aggiornati; le finestre già azzerate non compaiono. Se usi Claude anche altrove (altri computer, claude.ai), quei valori grigi possono essere più bassi del reale.
 
 La barra compare solo nel terminale: nell'app desktop non viene disegnata, mentre i comandi continuano a funzionare.
 
-In fondo alla seconda riga ci sono i limiti di utilizzo dell'abbonamento: la finestra di 5 ore, quella settimanale ed eventuali limiti settimanali per modello, ognuno con la percentuale usata e, dopo `↻`, il tempo che manca al reset. La percentuale è la quota del limite già consumata e usa gli stessi colori del contesto: verde sotto il 50%, gialla fino all'80%, rossa oltre. Senza abbonamento (chiave API) questa parte non compare.
+In fondo alla seconda riga ci sono i limiti di utilizzo dell'abbonamento: la finestra di 5 ore, quella settimanale ed eventuali limiti settimanali per modello, ognuno con la percentuale usata e, in grigio, il tempo che manca al reset. La percentuale è la quota del limite già consumata e usa gli stessi colori del contesto: verde sotto il 50%, gialla fino all'80%, rossa oltre. Con una sola finestra (i piani senza limite di 5 ore) l'etichetta `7d` non compare: restano percentuale e reset. Senza abbonamento (chiave API) questa parte non compare.
 
 La seconda riga parte dal contesto: token usati, percentuale della finestra e una barra che diventa gialla oltre il 50% e rossa oltre l'80%. Si aggiorna dopo ogni strumento che Claude usa, quindi la vedi salire anche durante un turno lungo. Al 70% e all'85% arriva un avviso.
 
@@ -94,6 +94,12 @@ Come si comportano i terminali:
 Per i blocchi la mod decodifica il PNG da sola, in TypeScript (le mod non hanno zlib). Uno screenshot normale richiede qualche decina di millisecondi, uno 4K quasi un secondo, una volta sola per ogni incolla. I PNG oltre 4 MiB (il massimo che una mod può leggere) e quelli interlacciati restano senza miniatura a blocchi: compare `[Image #n]`, ma `apri` funziona lo stesso.
 
 Il tag nel prompt non si può rinominare con il nome del file: `[Image #n]` è il modo in cui Claude Code collega l'allegato, e il nome del file si conosce solo quando il prompt viene inviato.
+
+## Codex
+
+Se usi anche Codex, in fondo alla seconda riga c'è il suo piano: `codex 12% 6g`, la percentuale usata e il tempo al reset, con l'etichetta della finestra (`5h`, `7d`) solo quando il piano ne ha più di una. Il dato è dell'account, quindi comprende anche l'uso fatto da altri computer o dal web.
+
+Lo chiede allo stesso endpoint che usa Codex (`chatgpt.com/backend-api/wham/usage`) con il token di `~/.codex/auth.json`, come fa [CodexBar](https://github.com/steipete/CodexBar): il token si legge e basta, non viene mai rinnovato né riscritto, perché rinnovarlo da qui romperebbe il login di Codex. Una sola sessione di Claude chiede, al massimo ogni 5 minuti: le altre leggono il risultato da un file condiviso nella cartella temporanea. Se il token è scaduto (Codex lo rinnova quando lo usi) o l'endpoint non risponde, il valore viene dall'ultimo file di sessione di Codex, con l'età in fondo. Una finestra già azzerata non compare. L'opzione `codex` su `no` spegne tutto; l'endpoint non è documentato, quindi può cambiare.
 
 ## Account (cswap)
 

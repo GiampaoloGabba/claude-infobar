@@ -14,6 +14,7 @@ import {
   passaA,
   pulsanteConto,
 } from './account'
+import { aggiornaCodex, codexDaMostrare } from './codex-uso'
 import { fitRow, imageNumbers, pngSize } from './layout'
 import { decodeThumbnail } from './png'
 import { fromBase64, rasterCells, toBase64 } from './raster'
@@ -458,6 +459,7 @@ export const register: Register = (on, options) => {
   const scelta = options.anteprime
   const conAnteprime = scelta !== 'no'
   const conAccount = options.account !== 'no'
+  const conCodex = options.codex !== 'no'
   if (scelta === 'immagini' || scelta === 'blocchi' || scelta === 'etichette') fissaAnteprima(scelta)
 
   on('session.start', async ($, e, next) => {
@@ -465,12 +467,19 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'revoca', description: 'Revoca un\'autorizzazione di sessione', argumentHint: '<n|tutte>' })
     await $.command.register({ name: 'autonomo', description: 'Attiva o disattiva la modalità autonoma di sessione' })
     await $.command.register({ name: 'ripresa', description: 'Stato della ripresa automatica dopo un limite', argumentHint: '[annulla]', immediate: true })
-    if (conAccount && !(await loginProprio($))) {
-      await $.command.register({ name: 'account', description: 'Account cswap: senza argomenti apre il pannello, con alias o numero fa lo switch del profilo principale', argumentHint: '[alias|numero]' })
-      await aggiornaContoSessione($)
+    // Dove la sessione ha un login suo (app desktop) la barra non c'è e cswap non la riguarda: niente timer.
+    if ((conAccount || conCodex) && !(await loginProprio($))) {
+      if (conAccount) {
+        await $.command.register({ name: 'account', description: 'Account cswap: senza argomenti apre il pannello, con alias o numero fa lo switch del profilo principale', argumentHint: '[alias|numero]' })
+        await aggiornaContoSessione($)
+      }
+      if (conCodex) void aggiornaCodex($).catch(() => undefined)
       $.clock.every(60_000, () => {
-        void aggiornaContoSessione($)
-        void pannelloAperto($).then(aperto => (aperto ? aggiornaContiSeVecchi($) : undefined))
+        if (conAccount) {
+          void aggiornaContoSessione($)
+          void pannelloAperto($).then(aperto => (aperto ? aggiornaContiSeVecchi($) : undefined))
+        }
+        if (conCodex) void aggiornaCodex($).catch(() => undefined)
       })
     }
     const dir = nomeCartella(await $.session.cwd())
@@ -700,6 +709,7 @@ export const register: Register = (on, options) => {
     // altro plugin non riceve i clic (Claude Code 2.1.288).
     const miniature = await rigaImmagini($, e, scelta === 'etichette')
     const conto = conAccount ? await pulsanteConto($, e) : null
+    const codex = conCodex ? await codexDaMostrare($, ora) : null
 
     return (
       <Box flexDirection="column">
@@ -736,12 +746,28 @@ export const register: Register = (on, options) => {
             const l = descriviLimite(f, ora)
             return (
               <Text key={f.kind}>
-                <Text dimColor>{` | ${l.etichetta} `}</Text>
-                {vistiAlle === null ? <Text color={l.colore}>{`${l.percentuale}%`}</Text> : <Text dimColor>{`${l.percentuale}%`}</Text>}
-                {l.mancano ? <Text dimColor>{` ↻ ${l.mancano}`}</Text> : null}
+                <Text dimColor>{finestre.length > 1 ? ` | ${l.etichetta} ` : ' | '}</Text>
+                <Text color={l.colore}>{`${l.percentuale}%`}</Text>
+                {l.mancano ? <Text dimColor>{` ${l.mancano}`}</Text> : null}
               </Text>
             )
           })}
+          {codex ? (
+            <Text key="codex">
+              <Text dimColor>{' | codex'}</Text>
+              {codex.limiti.map(f => {
+                const l = descriviLimite(f, ora)
+                return (
+                  <Text key={`codex-${f.kind}`}>
+                    {codex.limiti.length > 1 ? <Text dimColor>{` ${l.etichetta}`}</Text> : null}
+                    <Text color={l.colore}>{` ${l.percentuale}%`}</Text>
+                    {l.mancano ? <Text dimColor>{` ${l.mancano}`}</Text> : null}
+                  </Text>
+                )
+              })}
+              {codex.vistoAlle !== null ? <Text dimColor>{` · ${formattaDurata(ora - codex.vistoAlle)} fa`}</Text> : null}
+            </Text>
+          ) : null}
           {vistiAlle !== null && finestre.length ? <Text dimColor>{` · ${formattaDurata(ora - vistiAlle)} fa`}</Text> : null}
         </Box>
       </Box>

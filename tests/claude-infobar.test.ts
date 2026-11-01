@@ -141,6 +141,29 @@ test('la prima riga mostra i limiti di utilizzo', async ($, on) => {
   await ui.unmount()
 })
 
+test("con una sola finestra l'etichetta sparisce, con più finestre resta", async ($, on) => {
+  mock.clock(on)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: [''] }))
+  on('session.measure', () => ({ changed: [] }))
+  const banda = () => $.ui.mount({ plugin: 'infobar', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, bodyColumns: 120 } as never })
+
+  await $.session.measure({ context: { window: 1_000_000 }, rateLimits: [{ kind: 'seven_day', percentUsed: 5 }], changed: ['rateLimits'] })
+  const sola = await banda()
+  expect(await sola.find({ type: 'Text', text: /7d/ })).toBeUndefined()
+  expect(await sola.find({ type: 'Text', text: /^5%$/ })).toBeDefined()
+  await sola.unmount()
+
+  await $.session.measure({
+    context: { window: 1_000_000 },
+    rateLimits: [{ kind: 'seven_day', percentUsed: 5 }, { kind: 'seven_day_opus', percentUsed: 9 }],
+    changed: ['rateLimits'],
+  })
+  const due = await banda()
+  expect(await due.find({ type: 'Text', text: / \| 7d $/ })).toBeDefined()
+  expect(await due.find({ type: 'Text', text: / \| 7d opus $/ })).toBeDefined()
+  await due.unmount()
+})
+
 test('limiti salvati: restano solo le finestre non ancora azzerate', () => {
   const ora = Date.parse('2026-10-05T10:00:00Z')
   const finestre = [
@@ -189,7 +212,7 @@ test('dopo /clear contesto stimato e limiti ricordati dalla sessione precedente'
   const banda = () => $.ui.mount({ plugin: 'infobar', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, bodyColumns: 120 } as never })
   const prima = await banda()
   expect(await prima.find({ type: 'Text', text: /^5%$/ })).toBeDefined()
-  expect((await prima.find({ type: 'Text', text: /^33%$/ }))?.props).toMatchObject({ dimColor: true })
+  expect((await prima.find({ type: 'Text', text: /^33%$/ }))?.props).toMatchObject({ color: 'green' })
   expect(await prima.find({ type: 'Text', text: /90%/ })).toBeUndefined()
   expect(await prima.find({ type: 'Text', text: / · 2h fa$/ })).toBeDefined()
   await prima.unmount()

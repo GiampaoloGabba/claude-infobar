@@ -37,6 +37,9 @@ export type StatoConti = {
   occupato: string | null
 }
 
+/** I limiti di Codex; `vistoAlle` solo se il dato è vecchio (preso da un file di sessione). */
+export type UsoCodex = { limiti: Limite[]; vistoAlle: number | null }
+
 /** L'account mostrato nella barra: `fisso` se la sessione gira su un profilo CLAUDE_CONFIG_DIR dedicato. */
 export type ContoSessione = { nome: string; fisso: boolean }
 
@@ -63,6 +66,7 @@ declare module 'claude-code' {
       immagini: ImmagineIncollata[]
       conti: StatoConti
       contoSessione: ContoSessione | null
+      usoCodex: UsoCodex | null
     }
   }
 }
