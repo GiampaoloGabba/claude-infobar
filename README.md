@@ -112,6 +112,14 @@ Sotto `Write` ed `Edit` di un file di codice il link apre l'editor sulla prima r
 
 Sotto un comando compaiono anche gli URL del suo output, fino a tre: `↗ apri localhost:5173` dopo l'avvio di un server, `↗ apri PR #42` o `↗ apri nuova PR` dopo un `gh pr create` o un `git push`. Si aprono nel browser predefinito. Gli URL già scritti nel comando non contano, così un `curl` non fa comparire niente. Un comando lanciato in background, come un server di sviluppo, stampa l'indirizzo dopo: la mod guarda il suo file di output per due minuti e il link compare appena arriva.
 
+## Copia
+
+Sotto un blocco di una risposta di Claude c'è una riga grigia con `⧉ copia`, che mette negli appunti il suo testo in markdown, più un pulsante per ogni blocco di codice: `⧉ bash`, `⧉ json`, `⧉ codice` se non ha lingua, numerati (`bash 1`, `bash 2`) solo se due si chiamerebbero uguale. Dopo il clic il pulsante dice `✓ copiato` per due secondi.
+
+La riga c'è sotto i blocchi con del codice, sotto quelli di almeno tre righe e sotto l'ultimo blocco di ogni risposta, anche se è una frase sola (compare appena Claude ha finito). Le frasi brevi tra un tool e l'altro ("Ora controllo la cartella.") restano senza.
+
+Sulla riga di un comando Bash o PowerShell, a destra, c'è `⧉ copia comando`. Copia come `/copy`, quindi funziona anche via SSH dove il terminale accetta OSC 52. L'opzione `copia` su `hover` toglie le righe e mostra i pulsanti a destra dell'ultima riga solo con il puntatore sul messaggio (dove il terminale segue il mouse); `no` li toglie.
+
 ## Codex
 
 Se usi anche Codex, in fondo alla seconda riga c'è il suo piano: `codex 12% 6g`, la percentuale usata e il tempo al reset, con l'etichetta della finestra (`5h`, `7d`) solo quando il piano ne ha più di una. Il dato è dell'account, quindi comprende anche l'uso fatto da altri computer o dal web.

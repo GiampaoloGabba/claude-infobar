@@ -17,6 +17,7 @@ import {
 import { apri } from './apri'
 import { cartellaSessione } from './sessione'
 import { aggiornaCodex, codexDaMostrare } from './codex-uso'
+import { registraCopia, rispostaFinita } from './copia'
 import { fitRow, imageNumbers, pngSize } from './layout'
 import { type Anteprima, registraLetture } from './letture'
 import { decodeThumbnail } from './png'
@@ -416,6 +417,7 @@ export const register: Register = (on, options) => {
   const conCodex = options.codex !== 'no'
   if (scelta === 'immagini' || scelta === 'blocchi' || scelta === 'etichette') fissaAnteprima(scelta)
   registraLetture(on, conAnteprime ? anteprima : null, { editor: typeof options.editor === 'string' ? options.editor : undefined })
+  if (options.copia !== 'no') registraCopia(on, options.copia === 'hover' ? 'hover' : 'sempre')
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'autorizza', description: 'Aggiunge un\'autorizzazione di sessione (alias: db, prod, deploy, commit, push)', argumentHint: '[testo|alias]' })
@@ -469,7 +471,9 @@ export const register: Register = (on, options) => {
     if (e.reason === 'answer') if ((await read($, tentativi)) !== 0) await update($, tentativi, () => 0)
     await aggiornaIntestazione($)
     await aggiornaAgenti($)
-    return next(e)
+    const esito = await next(e)
+    if (e.reason === 'answer') rispostaFinita($, esito.text)
+    return esito
   })
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {

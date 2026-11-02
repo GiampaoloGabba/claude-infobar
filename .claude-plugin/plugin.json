@@ -1,7 +1,7 @@
 {
   "name": "infobar",
-  "description": "Una riga sopra il prompt con modello, effort, cartella, branch e contesto, più semaforo di compattazione, ripresa automatica dopo i rate limit, autorizzazioni di sessione che sopravvivono al compact, anteprime delle immagini incollate, link nel transcript per aprire immagini, documenti, codice nell'editor e URL, account cswap con switch e uso di Codex",
-  "version": "0.8.0",
+  "description": "Una riga sopra il prompt con modello, effort, cartella, branch e contesto, più semaforo di compattazione, ripresa automatica dopo i rate limit, autorizzazioni di sessione che sopravvivono al compact, anteprime delle immagini incollate, link nel transcript per aprire immagini, documenti, codice nell'editor e URL, pulsanti per copiare risposte, codice e comandi, account cswap con switch e uso di Codex",
+  "version": "0.9.0",
   "author": {
     "name": "Giampaolo Gabba",
     "url": "https://github.com/GiampaoloGabba"
@@ -33,6 +33,13 @@
       "description": "Dove aprire i file di codice che Claude scrive o modifica, dal link sotto la riga del tool: auto usa l'IDE del terminale (Rider, VS Code), altrimenti Rider per i file .NET e VS Code per il resto, tra quelli installati; no toglie il link",
       "default": "auto",
       "options": ["auto", "rider", "code", "cursor", "no"]
+    },
+    "copia": {
+      "type": "string",
+      "title": "Pulsanti copia",
+      "description": "I pulsanti per copiare una risposta di Claude, i suoi blocchi di codice e i comandi, sull'ultima riga a destra: sempre li mostra in grigio, hover solo sotto il puntatore, no li toglie",
+      "default": "sempre",
+      "options": ["sempre", "hover", "no"]
     },
     "account": {
       "type": "string",
