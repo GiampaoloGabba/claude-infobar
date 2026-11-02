@@ -60,6 +60,15 @@ export type ContoSessione = { nome: string; fisso: boolean }
 declare module 'claude-code' {
   interface PluginState {
     'infobar': {
+      /**
+       * Per riga del transcript (il suo requestId): `firma:chiave` del pulsante di copia appena premuto, che
+       * per due secondi dice "copiato"; null altrimenti. Una riga per valore, così si ridisegna solo lei.
+       */
+      copiato: StateFamily<string | null>
+      /** I testi delle ultime risposte finite: il loro ultimo blocco ha la riga di copia anche se è breve. */
+      risposteFinite: string[]
+      /** Per chiamata di Bash o PowerShell (il tool_use_id): i documenti scritti e gli URL dell'output. */
+      trovatiComandi: StateFamily<{ prodotti: string[]; url: string[] }>
       modello: string | null
       effort: string | null
       cartella: string | null

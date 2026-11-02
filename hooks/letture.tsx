@@ -1,3 +1,4 @@
+import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, On, RenderElement, RenderInput } from 'claude-code'
 
 import { apri } from './apri'
@@ -120,7 +121,7 @@ export function daAprire(chiamata: Chiamata, immagini = true, trovati: Trovati =
 // Le righe del transcript non portano quello che serve: l'output di Read non ha il percorso, e cosa ha
 // prodotto un comando si sa solo guardando il disco quando è finito. Lo lascia qui tool.call.
 const percorsi = new Map<string, string>()
-const trovatiDa = new Map<string, Trovati>()
+const trovatiComandi = atom({ plugin: 'infobar', key: 'trovatiComandi' } as const, { prodotti: [], url: [] } as { prodotti: string[]; url: string[] })
 
 function nomeFile(path: string | null): string {
   return path?.split(/[\\/]/).pop() || 'immagine'
@@ -214,8 +215,12 @@ async function cercaProdotti($: EngineInterface, comando: string, inizio: number
   return prodotti
 }
 
-function aggiungiTrovati(id: string, nuovi: Trovati) {
-  trovatiDa.set(id, { ...trovatiDa.get(id), ...nuovi })
+// Un valore per chiamata: quando arriva l'URL di un server in background si ridisegna solo la sua riga.
+async function aggiungiTrovati($: EngineInterface, id: string, nuovi: Trovati) {
+  await update($, memberOf(trovatiComandi, { requestId: id }), vecchi => ({
+    prodotti: [...(nuovi.prodotti ?? vecchi.prodotti)],
+    url: [...(nuovi.url ?? vecchi.url)],
+  }))
 }
 
 async function sorvegliaOutput($: EngineInterface, id: string, taskId: string, comando: string) {
@@ -225,8 +230,7 @@ async function sorvegliaOutput($: EngineInterface, id: string, taskId: string, c
     const letto = file ? await leggiSeCambiato($, file).catch(() => null) : null
     const url = letto ? urlNelTesto(letto.testo, comando) : []
     if (url.length) {
-      aggiungiTrovati(id, { url })
-      $.ui.invalidate('ui.render')
+      await aggiungiTrovati($, id, { url })
       return
     }
     // Un server stampa il suo indirizzo all'inizio: oltre un mega di output senza URL non ne arriveranno.
@@ -234,6 +238,13 @@ async function sorvegliaOutput($: EngineInterface, id: string, taskId: string, c
     if ((await $.clock.now()) < fine) $.clock.after(1000, giro)
   }
   $.clock.after(1000, giro)
+}
+
+// Solo le righe dei comandi leggono cosa hanno trovato: le altre non hanno niente da aspettare.
+async function daMostrare($: EngineInterface, c: Chiamata, immagini: boolean): Promise<Link[]> {
+  const comando = c.tool === 'Bash' || c.tool === 'PowerShell'
+  const trovati = comando && c.tool_use_id ? await read($, memberOf(trovatiComandi, { requestId: c.tool_use_id })) : undefined
+  return daAprire(c, immagini, trovati)
 }
 
 type EsitoComando = { result?: unknown; isError?: boolean }
@@ -255,7 +266,7 @@ async function conTrovati<R>($: EngineInterface, id: string, comando: string, de
       else {
         const prodotti = await cercaProdotti($, comando, inizio)
         const url = urlNelTesto(`${stringa(output.stdout) ?? ''}\n${stringa(output.stderr) ?? ''}`, comando)
-        if (prodotti.length || url.length) aggiungiTrovati(id, { prodotti, url })
+        if (prodotti.length || url.length) await aggiungiTrovati($, id, { prodotti, url })
       }
     }
   } catch {
@@ -288,19 +299,20 @@ export function registraLetture(on: On, anteprima: Promise<Anteprima> | null, op
   on('tool.call', { tool: 'Bash' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, e.description, () => next(e)))
   on('tool.call', { tool: 'PowerShell' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, e.description, () => next(e)))
 
-  const daMostrare = (c: Chiamata) => daAprire(c, anteprima !== null, c.tool_use_id ? trovatiDa.get(c.tool_use_id) : undefined)
+  const immagini = anteprima !== null
 
   // Le chiamate raggruppate ("Read 1 file, ran 2 shell commands"): i link vanno sotto il gruppo, chiuso o aperto.
   on('ui.render', { component: 'ToolGroup', surface: 'terminal' }, async ($, e, next) => {
     const sopra = await next(e)
-    const links = e.props.calls.flatMap(daMostrare)
+    const links: Link[] = []
+    for (const c of e.props.calls) links.push(...(await daMostrare($, c, immagini)))
     return links.length ? conLink($, e, sopra, links, await modo(links), opzioni) : sopra
   })
 
   // Una chiamata fuori da un gruppo ha la sua riga di risultato ("└ Read image (95.7KB)", il diff di una Edit).
   on('ui.render', { component: 'ToolResult', surface: 'terminal' }, async ($, e, next) => {
     const sopra = await next(e)
-    const links = daMostrare({ ...e.props, input: { file_path: percorsi.get(e.props.tool_use_id) } })
+    const links = await daMostrare($, { ...e.props, input: { file_path: percorsi.get(e.props.tool_use_id) } }, immagini)
     return links.length ? conLink($, e, sopra, links, await modo(links), opzioni) : sopra
   })
 }

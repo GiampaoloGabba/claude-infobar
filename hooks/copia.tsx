@@ -1,3 +1,4 @@
+import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, On, RenderElement, RenderInput, UiPressArgument } from 'claude-code'
 
 export type BloccoDiCodice = { lingua: string; testo: string }
@@ -30,21 +31,21 @@ function firma(testo: string): string {
   return `${testo.length}:${h}`
 }
 
-// Il pulsante appena premuto, che per un attimo dice "copiato".
-let copiato: string | null = null
+// Il pulsante appena premuto, che per un attimo dice "copiato": un valore per riga, così il clic ridisegna
+// solo la sua. Più blocchi di una risposta condividono la riga (il messaggio): il valore dice anche quale.
+const copiato = atom({ plugin: 'infobar', key: 'copiato' } as const, null as string | null)
+const risposteFinite = atom({ plugin: 'infobar', key: 'risposteFinite' } as const, [] as string[])
 
-async function copia($: EngineInterface, testo: string, chi: string, press: UiPressArgument) {
+async function copia($: EngineInterface, riga: string, testo: string, chi: string, press: UiPressArgument) {
   const esito = await $.ui.copy({ text: testo, surface: press.surface })
   if (!esito.isCopied) {
     $.ui.toast(`Copia non riuscita (${esito.reason})`, { timeoutMs: 4000 })
     return
   }
-  copiato = chi
-  $.ui.invalidate('ui.render')
-  $.clock.after(CONFERMA_MS, () => {
-    if (copiato !== chi) return
-    copiato = null
-    $.ui.invalidate('ui.render')
+  const suo = memberOf(copiato, { requestId: riga })
+  await update($, suo, () => chi)
+  $.clock.after(CONFERMA_MS, async () => {
+    if ((await read($, suo)) === chi) await update($, suo, () => null)
   })
 }
 
@@ -54,15 +55,15 @@ type Pulsante = { chiave: string; etichetta: string; testo: string }
 const RIGHE_MINIME = 3
 // Le ultime risposte finite: il loro ultimo blocco ha sempre la riga, anche se è una frase sola.
 const FINALI_TENUTE = 50
-const finali: string[] = []
 let attiva = false
 
-/** Da turn.complete: la risposta appena finita, il cui ultimo blocco riceve ora la sua riga di pulsanti. */
-export function rispostaFinita($: EngineInterface, testo: string) {
+/**
+ * Da turn.complete: la risposta appena finita, il cui ultimo blocco riceve ora la sua riga di pulsanti.
+ * Ridisegna solo i blocchi brevi, gli unici che leggono le risposte finite.
+ */
+export async function rispostaFinita($: EngineInterface, testo: string) {
   if (!attiva || !testo.trim()) return
-  finali.push(testo)
-  if (finali.length > FINALI_TENUTE) finali.shift()
-  $.ui.invalidate('ui.render')
+  await update($, risposteFinite, l => [...l, testo].slice(-FINALI_TENUTE))
 }
 
 /** Se il blocco chiude una risposta finita: le risposte sono il testo di turn.complete, che finisce con lui. */
@@ -71,33 +72,39 @@ export function chiudeRisposta(blocco: string, risposte: readonly string[]): boo
   return testo !== '' && risposte.some(r => r.trim().endsWith(testo))
 }
 
-/** Se sotto un blocco di risposta va la riga dei pulsanti: con codice, lungo, o l'ultimo della risposta. */
-export function meritaPulsanti(blocco: string, risposte: readonly string[]): boolean {
-  return blocchiDiCodice(blocco).length > 0 || blocco.trim().split('\n').length >= RIGHE_MINIME || chiudeRisposta(blocco, risposte)
+/** Se un blocco ha la riga dei pulsanti comunque, per il suo contenuto: con codice o lungo. */
+export function haDaCopiare(blocco: string): boolean {
+  return blocchiDiCodice(blocco).length > 0 || blocco.trim().split('\n').length >= RIGHE_MINIME
 }
 
-function pulsanti$($: EngineInterface, e: RenderInput<'AssistantMessage' | 'ToolUse'>, id: string, lista: Pulsante[]) {
+/** Se sotto un blocco di risposta va la riga dei pulsanti: con codice, lungo, o l'ultimo della risposta. */
+export function meritaPulsanti(blocco: string, risposte: readonly string[]): boolean {
+  return haDaCopiare(blocco) || chiudeRisposta(blocco, risposte)
+}
+
+async function pulsanti$($: EngineInterface, e: RenderInput<'AssistantMessage' | 'ToolUse'>, id: string, lista: Pulsante[]) {
   if (e.surface !== 'terminal') return []
   const { Button, Text } = $.ui.resolve(e)
+  const premuto = await read($, memberOf(copiato, e))
   return lista.map(p => {
     const chi = `${id}:${p.chiave}`
     return (
-      <Button key={p.chiave} plain dimColor={copiato !== chi} onPress={(press: UiPressArgument) => copia($, p.testo, chi, press)}>
-        {copiato === chi ? <Text color="green">{'✓ copiato'}</Text> : <Text>{`⧉ ${p.etichetta}`}</Text>}
+      <Button key={p.chiave} plain dimColor={premuto !== chi} onPress={(press: UiPressArgument) => copia($, e.requestId, p.testo, chi, press)}>
+        {premuto === chi ? <Text color="green">{'✓ copiato'}</Text> : <Text>{`⧉ ${p.etichetta}`}</Text>}
       </Button>
     )
   })
 }
 
 /** La riga dei pulsanti sotto il blocco, allineata al testo: si vede a quale messaggio appartiene. */
-function rigaSotto($: EngineInterface, e: RenderInput<'AssistantMessage'>, sopra: RenderElement, id: string, lista: Pulsante[]): RenderElement {
+async function rigaSotto($: EngineInterface, e: RenderInput<'AssistantMessage'>, sopra: RenderElement, id: string, lista: Pulsante[]): Promise<RenderElement> {
   if (e.surface !== 'terminal') return sopra
   const { Box } = $.ui.resolve(e)
   return (
     <Box flexDirection="column">
       {sopra}
       <Box flexDirection="row" columnGap={2} paddingLeft={2}>
-        {pulsanti$($, e, id, lista)}
+        {await pulsanti$($, e, id, lista)}
       </Box>
     </Box>
   )
@@ -107,14 +114,14 @@ function rigaSotto($: EngineInterface, e: RenderInput<'AssistantMessage'>, sopra
  * I pulsanti sopra l'ultima riga, a destra, senza righe in più: per un comando, dove stanno sulla sua stessa
  * riga, e per le risposte nel modo `hover`, dove compaiono solo con il puntatore sul messaggio.
  */
-function aDestra(
+async function aDestra(
   $: EngineInterface,
   e: RenderInput<'AssistantMessage' | 'ToolUse'>,
   sopra: RenderElement,
   id: string,
   lista: Pulsante[],
   soloHover: boolean,
-): RenderElement {
+): Promise<RenderElement> {
   if (e.surface !== 'terminal') return sopra
   const { Box } = $.ui.resolve(e)
   const nascosti = soloHover ? ({ display: 'none', hover: { display: 'flex' } } as const) : {}
@@ -122,7 +129,7 @@ function aDestra(
     <Box key="copia" flexDirection="column">
       {sopra}
       <Box position="absolute" bottom={0} right={0} flexDirection="row" columnGap={1} {...nascosti}>
-        {pulsanti$($, e, id, lista)}
+        {await pulsanti$($, e, id, lista)}
       </Box>
     </Box>
   )
@@ -141,7 +148,9 @@ export function registraCopia(on: On, modo: ModoCopia) {
       ...blocchi.map((b, i) => ({ chiave: `copia-codice-${i}`, etichetta: etichette[i]!, testo: b.testo })),
     ]
     if (modo === 'hover') return aDestra($, e, sopra, firma(text), lista, true)
-    return meritaPulsanti(text, finali) ? rigaSotto($, e, sopra, firma(text), lista) : sopra
+    // Solo un blocco breve deve sapere se chiude una risposta: solo lui legge le risposte finite.
+    const conRiga = haDaCopiare(text) || chiudeRisposta(text, await read($, risposteFinite))
+    return conRiga ? rigaSotto($, e, sopra, firma(text), lista) : sopra
   })
 
   on('ui.render', { component: 'ToolUse', surface: 'terminal' }, async ($, e, next) => {

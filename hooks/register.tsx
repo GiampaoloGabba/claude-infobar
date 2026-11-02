@@ -461,7 +461,7 @@ export const register: Register = (on, options) => {
     await aggiornaIntestazione($)
     await lavoriDaAgenti($)
     const esito = await next(e)
-    if (e.reason === 'answer') rispostaFinita($, esito.text)
+    if (e.reason === 'answer') await rispostaFinita($, esito.text)
     return esito
   })
 

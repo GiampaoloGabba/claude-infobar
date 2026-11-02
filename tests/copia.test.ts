@@ -56,12 +56,11 @@ test('una risposta offre di copiare il testo e ogni blocco di codice, e dice per
   await ui.press({ key: 'copia-testo' })
   expect(copiati).toEqual(['pnpm install\npnpm dev', RISPOSTA])
 
-  const dopo = await $.ui.mount(messaggio('terminal', { text: RISPOSTA, isFirstOfReply: true }))
-  expect(await dopo.find({ type: 'Text', text: '✓ copiato' })).toBeDefined()
-  expect(await dopo.find({ type: 'Text', text: '⧉ bash' })).toBeDefined()
+  // La stessa riga si ridisegna da sola: la conferma è il suo stato, non un ridisegno di tutto il transcript.
+  expect(await ui.find({ type: 'Text', text: '✓ copiato' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '⧉ bash' })).toBeDefined()
   await clock.advance(2000)
-  const poi = await $.ui.mount(messaggio('terminal', { text: RISPOSTA, isFirstOfReply: true }))
-  expect(await poi.find({ type: 'Text', text: '✓ copiato' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '✓ copiato' })).toBeUndefined()
 })
 
 test('niente pulsanti sui riassunti e sul desktop', async ($, on) => {
