@@ -2,6 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { coda, conAgenti, conRiepilogo, notificaLavoro, pota } from '../hooks/lavori'
+import { comandoOutput } from '../hooks/editor'
 import { fileOutputNelTesto } from '../hooks/sessione'
 import type { Lavoro } from '../types'
 
@@ -82,10 +83,10 @@ const BS = String.fromCharCode(92)
 const posix = (p: string) => p.replaceAll(BS, '/')
 const CARTELLA = 'C:/Temp/claude/E--work/sess-1/tasks'
 
-type Ospite = { fermati: unknown[]; comandi: string[][]; file: Record<string, string>; tasks: string }
+type Ospite = { fermati: unknown[]; comandi: string[][]; file: Record<string, string>; tasks: string; letture: Record<string, number> }
 
 function ospite(on: On, sessione = 'sess-1'): Ospite {
-  const o: Ospite = { fermati: [], comandi: [], file: {}, tasks: CARTELLA }
+  const o: Ospite = { fermati: [], comandi: [], file: {}, tasks: CARTELLA, letture: {} }
   const env: Record<string, string> = { OS: 'Windows_NT', TEMP: `C:${BS}Temp` }
   on('env.get', ($, e) => ({ value: env[e.name] }))
   on('session.id', () => ({ value: sessione }))
@@ -96,7 +97,12 @@ function ospite(on: On, sessione = 'sess-1'): Ospite {
   })
   on('session.root', () => ({ value: `E:${BS}work` }))
   on('fs.exists', ($, e) => ({ value: Object.keys(o.file).some(p => p === posix(e.path) || p.startsWith(`${posix(e.path)}/`)) }))
+  on('fs.stat', ($, e) => {
+    const contenuto = o.file[posix(e.path)]
+    return contenuto === undefined ? { deny: 'ENOENT' } : { value: { kind: 'file', size: contenuto.length, mtimeMs: 0, isLink: false } }
+  })
   on('fs.read', ($, e) => {
+    o.letture[posix(e.path)] = (o.letture[posix(e.path)] ?? 0) + 1
     const contenuto = o.file[posix(e.path)]
     return contenuto === undefined ? { deny: 'ENOENT' } : { value: contenuto }
   })
@@ -264,4 +270,35 @@ test("il percorso dell'output si legge dal testo di Claude Code, anche con spazi
   expect(fileOutputNelTesto(`Command running in background with ID: b7. Output is being written to: ${win}`)).toBe(win)
   expect(fileOutputNelTesto('<output-file>/tmp/claude-501/-w/s1/tasks/b8.output</output-file>')).toBe('/tmp/claude-501/-w/s1/tasks/b8.output')
   expect(fileOutputNelTesto('Command completed')).toBeNull()
+})
+
+test('a pannello aperto un output che non cambia non si rilegge', async ($, on) => {
+  const clock = mock.clock(on)
+  const o = ospite(on)
+  const file = `${CARTELLA}/b1.output`
+  o.file[file] = 'giro 1\n'
+  await $.classic.Stop({
+    stop_hook_active: false,
+    background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'contatore', command: 'node conta.js' }],
+  } as never)
+  await $.command.run({ command: 'lavori', args: '' } as never)
+  const lettePrima = o.letture[file] ?? 0
+  await clock.advance(6000)
+  expect(o.letture[file]).toBe(lettePrima)
+
+  o.file[file] += 'giro 2\n'
+  await clock.advance(2000)
+  expect(o.letture[file]).toBe(lettePrima + 1)
+})
+
+test("l'output si apre con l'editor, con Notepad++ in monitoraggio o con un comando proprio", () => {
+  const file = 'C:/Temp/claude/x/tasks/b1.output'
+  const nativo = file.replaceAll('/', BS)
+  const shell = ['rundll32.exe', 'shell32.dll,ShellExec_RunDLL']
+  expect(comandoOutput(undefined, file, 9, true)).toBeNull()
+  expect(comandoOutput('editor', file, 9, true)).toBeNull()
+  expect(comandoOutput('notepad++', file, 9, true)).toEqual([...shell, 'notepad++.exe', '-monitor', '-n9', nativo])
+  expect(comandoOutput('"C:/Tools/Log Viewer/lv.exe" --tail {file}', file, 9, true)).toEqual([...shell, 'C:/Tools/Log Viewer/lv.exe', '--tail', nativo])
+  expect(comandoOutput('subl', file, 9, true)).toEqual([...shell, 'subl', nativo])
+  expect(comandoOutput('less +{riga} {file}', '/tmp/b1.output', 9, false)).toEqual(['less', '+9', '/tmp/b1.output'])
 })

@@ -634,7 +634,12 @@ export const register: Register = (on, options) => {
   }).catch(() => ({ text: 'Comando /account non riuscito: vedi il log di debug.' }))
 
   on('ui.render', { component: 'Pane', requestId: PANNELLO_CONTI }, async ($, e) => disegnaConti($, e))
-  on('ui.render', { component: 'Pane', requestId: PANNELLO_LAVORI }, async ($, e) => disegnaLavori($, e, typeof options.editor === 'string' ? options.editor : undefined))
+  on('ui.render', { component: 'Pane', requestId: PANNELLO_LAVORI }, async ($, e) =>
+    disegnaLavori($, e, {
+      editor: typeof options.editor === 'string' ? options.editor : undefined,
+      apriOutput: typeof options.apriOutput === 'string' ? options.apriOutput : undefined,
+    }),
+  )
 
   on('command.run', { command: 'lavori' }, async $ => {
     await apriLavori($)

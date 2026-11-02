@@ -66,15 +66,53 @@ function installatiSu($: EngineInterface, windows: boolean) {
   return installati
 }
 
+type Ambiente = { windows: boolean; terminalEmulator?: string; termProgram?: string }
+let ambiente: Promise<Ambiente> | undefined
+
+// Il terminale e il sistema non cambiano durante la sessione: si chiedono una volta, non a ogni riga disegnata.
+async function leggiAmbiente($: EngineInterface): Promise<Ambiente> {
+  return {
+    windows: (await $.env.get('OS')) === 'Windows_NT',
+    terminalEmulator: await $.env.get('TERMINAL_EMULATOR'),
+    termProgram: await $.env.get('TERM_PROGRAM'),
+  }
+}
+
+function ambienteDi($: EngineInterface) {
+  ambiente ??= leggiAmbiente($)
+  return ambiente
+}
+
 export async function editorPer($: EngineInterface, path: string, opzione: string | undefined): Promise<Editor | null> {
   if (opzione === 'no') return null
-  const windows = (await $.env.get('OS')) === 'Windows_NT'
-  const env = { terminalEmulator: await $.env.get('TERMINAL_EMULATOR'), termProgram: await $.env.get('TERM_PROGRAM') }
-  return scegliEditor(path, opzione, env, [...(await installatiSu($, windows)).keys()])
+  const env = await ambienteDi($)
+  return scegliEditor(path, opzione, env, [...(await installatiSu($, env.windows)).keys()])
+}
+
+function argomenti(modello: string): string[] {
+  return [...modello.matchAll(/"([^"]*)"|(\S+)/g)].map(m => (m[1] ?? m[2])!)
+}
+
+/**
+ * Il comando che apre l'output di un lavoro secondo l'opzione `apriOutput`: null per l'editor (il
+ * predefinito), `notepad++` per Notepad++ con il monitoraggio del file acceso (segue le righe nuove come
+ * tail -f), altrimenti un comando con `{file}` e `{riga}` al posto del percorso e dell'ultima riga.
+ */
+export function comandoOutput(opzione: string | undefined, file: string, riga: number, windows: boolean): string[] | null {
+  const scelta = opzione?.trim() ?? ''
+  if (!scelta || scelta === 'editor') return null
+  const nativo = windows ? file.replaceAll('/', String.fromCharCode(92)) : file
+  const argv =
+    scelta === 'notepad++'
+      ? ['notepad++.exe', '-monitor', `-n${riga}`, nativo]
+      : argomenti(scelta).map(a => a.replaceAll('{file}', nativo).replaceAll('{riga}', String(riga)))
+  if (!argv.length) return null
+  if (scelta !== 'notepad++' && !scelta.includes('{file}')) argv.push(nativo)
+  return windows ? ['rundll32.exe', 'shell32.dll,ShellExec_RunDLL', ...argv] : argv
 }
 
 export async function apriInEditor($: EngineInterface, editor: Editor, path: string, riga: number) {
-  const windows = (await $.env.get('OS')) === 'Windows_NT'
+  const { windows } = await ambienteDi($)
   const eseguibile = (await installatiSu($, windows)).get(editor) ?? editor
   const esito = await $.process.run(comandoEditor(editor, eseguibile, path, riga, windows)).catch((errore: unknown) => errore)
   if (esito instanceof Error) $.ui.toast(`Non riesco ad aprire ${path} in ${NOMI_EDITOR[editor]}: ${esito.message}`)

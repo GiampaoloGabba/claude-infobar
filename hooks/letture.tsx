@@ -4,6 +4,7 @@ import { apri } from './apri'
 import { NOMI_EDITOR, apriInEditor, editorPer, rigaModificata } from './editor'
 import { type Size, fitCells, pngSize } from './layout'
 import { lavoroAvviato } from './lavori'
+import { leggiSeCambiato } from './file'
 import { fileOutputLavoro, fileOutputNelTesto, ricordaFileOutput } from './sessione'
 import { apriUrl, etichettaUrl, urlNelTesto } from './url'
 
@@ -45,6 +46,7 @@ const PERCORSO_PRODOTTO = new RegExp(
 const TOLLERANZA_MS = 2000
 // Un server lanciato in background stampa il suo indirizzo quando è pronto: si guarda il suo output per due minuti.
 const SORVEGLIANZA_MS = 120_000
+const MAX_OUTPUT_URL = 1024 * 1024
 
 function stringa(valore: unknown): string | null {
   return typeof valore === 'string' ? valore : null
@@ -220,11 +222,16 @@ async function sorvegliaOutput($: EngineInterface, id: string, taskId: string, c
   const fine = (await $.clock.now()) + SORVEGLIANZA_MS
   const giro = async () => {
     const file = await fileOutputLavoro($, taskId)
-    const url = file ? urlNelTesto(await $.fs.read(file).catch(() => ''), comando) : []
+    const letto = file ? await leggiSeCambiato($, file).catch(() => null) : null
+    const url = letto ? urlNelTesto(letto.testo, comando) : []
     if (url.length) {
       aggiungiTrovati(id, { url })
       $.ui.invalidate('ui.render')
-    } else if ((await $.clock.now()) < fine) $.clock.after(1000, giro)
+      return
+    }
+    // Un server stampa il suo indirizzo all'inizio: oltre un mega di output senza URL non ne arriveranno.
+    if ((letto?.dimensione ?? 0) > MAX_OUTPUT_URL) return
+    if ((await $.clock.now()) < fine) $.clock.after(1000, giro)
   }
   $.clock.after(1000, giro)
 }

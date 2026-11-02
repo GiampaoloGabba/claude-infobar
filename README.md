@@ -128,10 +128,12 @@ Un clic sul `◷ 3` della barra, o `/lavori`, apre un pannello con i lavori in b
 I pulsanti, in azzurro:
 
 - `▾ output` apre l'output intero (le ultime 40 righe) dentro il pannello, `▴ output` lo richiude; c'è anche sui lavori finiti, finché il file esiste.
-- `↗ apri` apre il file dell'output nell'editor (quello dell'opzione `editor`), sull'ultima riga.
+- `↗ apri` apre il file dell'output nell'editor (quello dell'opzione `editor`), sull'ultima riga. L'opzione `apriOutput` ("Apri output con" in `/config`) lo cambia: `notepad++` lo apre in Notepad++ con il monitoraggio del file acceso, che segue le righe nuove come `tail -f`; un comando tuo, con `{file}` e `{riga}` al posto del percorso e dell'ultima riga (senza `{file}` il percorso va in fondo), apre con qualunque altro programma.
 - `■ ferma`, in rosso, solo sui lavori in corso: al primo clic diventa `■ ferma? clicca di nuovo` (la richiesta scade dopo qualche secondo), al secondo lo ferma come farebbe Claude con TaskStop. Claude riceve la notifica e ne tiene conto.
 
 Un lavoro che Claude ferma da sé (TaskStop) esce subito dal conto. Uno fermato dall'interfaccia di Claude Code esce al riepilogo di fine turno, perché la mod non ne riceve notizia prima.
+
+Il pannello rilegge un file di output solo quando cambia. Oltre i 4 MB (il massimo che una mod può leggere) le ultime righe non si possono mostrare e il pannello lo dice: la fine si vede con `↗ apri`.
 
 La durata parte da quando la mod ha visto il lavoro: per un comando lanciato in background è la partenza; per un workflow o un Monitor, che compaiono solo nel riepilogo di fine turno, può essere un po' dopo.
 

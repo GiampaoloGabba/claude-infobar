@@ -34,6 +34,12 @@
       "default": "auto",
       "options": ["auto", "rider", "code", "cursor", "no"]
     },
+    "apriOutput": {
+      "type": "string",
+      "title": "Apri output con",
+      "description": "Con cosa apre l'output di un lavoro il pulsante ↗ apri del pannello dei lavori: editor (il predefinito, quello dell'opzione Editor); notepad++ per Notepad++ con il monitoraggio del file, che segue le righe nuove come tail -f; oppure un comando tuo, con {file} e {riga} al posto del percorso e dell'ultima riga",
+      "default": "editor"
+    },
     "copia": {
       "type": "string",
       "title": "Pulsanti copia",

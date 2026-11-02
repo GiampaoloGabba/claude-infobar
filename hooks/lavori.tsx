@@ -3,7 +3,8 @@ import type { AgentInfo, EngineInterface, RenderInput, Timer } from 'claude-code
 
 import type { Attivita, Lavoro } from '../types'
 import { apriTesto } from './apri'
-import { apriInEditor, editorPer } from './editor'
+import { apriInEditor, comandoOutput, editorPer } from './editor'
+import { MAX_LETTURA, leggiSeCambiato } from './file'
 import { fileOutputLavoro, fileOutputNelTesto, ricordaFileOutput } from './sessione'
 import { formattaDurata } from './testi'
 
@@ -194,12 +195,18 @@ async function leggiOutput($: EngineInterface): Promise<string | null> {
   for (const l of await read($, lavori)) {
     const file = await fileOutput($, l.id)
     if (!file) continue
-    const testo = await $.fs.read(file).catch((e: unknown) => {
+    const letto = await leggiSeCambiato($, file).catch((e: unknown) => {
       errore ??= `${file}: ${e instanceof Error ? e.message : String(e)}`
       return null
     })
-    if (testo === null) continue
-    output[l.id] = { file, coda: inCorso(l) ? coda(testo) : [], ...(aperti.includes(l.id) ? { intero: coda(testo, RIGHE_OUTPUT) } : {}) }
+    if (!letto) continue
+    // Oltre i 4 MB $.fs.read dà solo l'inizio del file: le "ultime righe" sarebbero sbagliate.
+    const troppo = letto.dimensione > MAX_LETTURA ? [`(output di ${Math.round(letto.dimensione / 1048576)} MB: la fine si vede con ↗ apri)`] : null
+    output[l.id] = {
+      file,
+      coda: inCorso(l) ? (troppo ?? coda(letto.testo)) : [],
+      ...(aperti.includes(l.id) ? { intero: troppo ?? coda(letto.testo, RIGHE_OUTPUT) } : {}),
+    }
   }
   if (JSON.stringify(await read($, outputLavori)) !== JSON.stringify(output)) await update($, outputLavori, () => output)
   return errore
@@ -245,14 +252,24 @@ const SEGNO_STATO: Record<Lavoro['stato'], string> = { 'in corso': '◷', comple
 
 // Nell'editor, sull'ultima riga: si portano in primo piano da soli, a differenza del Blocco note lanciato
 // da un processo in background, che Windows apre dietro al terminale.
-async function apriNellEditor($: EngineInterface, file: string, opzioneEditor: string | undefined) {
-  const righe = (await $.fs.read(file).catch(() => '')).split('\n').length
-  const editor = await editorPer($, file, opzioneEditor === 'no' ? 'auto' : opzioneEditor)
-  if (editor) await apriInEditor($, editor, file, Math.max(1, righe))
+export type OpzioniLavori = { editor?: string; apriOutput?: string }
+
+async function apriOutput($: EngineInterface, file: string, opzioni: OpzioniLavori) {
+  const letto = await leggiSeCambiato($, file).catch(() => null)
+  const riga = Math.max(1, (letto?.testo ?? '').split('\n').length)
+  const windows = (await $.env.get('OS')) === 'Windows_NT'
+  const proprio = comandoOutput(opzioni.apriOutput, file, riga, windows)
+  if (proprio) {
+    const esito = await $.process.run(proprio).catch((errore: unknown) => errore)
+    if (esito instanceof Error) $.ui.toast(`Non riesco ad aprire l'output con "${opzioni.apriOutput}": ${esito.message}`)
+    return
+  }
+  const editor = await editorPer($, file, opzioni.editor === 'no' ? 'auto' : opzioni.editor)
+  if (editor) await apriInEditor($, editor, file, riga)
   else await apriTesto($, file)
 }
 
-export async function disegnaLavori($: EngineInterface, e: RenderInput<'Pane'>, opzioneEditor?: string) {
+export async function disegnaLavori($: EngineInterface, e: RenderInput<'Pane'>, opzioni: OpzioniLavori = {}) {
   await read($, battito)
   const lista = await read($, lavori)
   const datiOutput = await read($, outputLavori)
@@ -282,7 +299,7 @@ export async function disegnaLavori($: EngineInterface, e: RenderInput<'Pane'>, 
           </Button>
         ) : null}
         {percorso ? (
-          <Button key={`apri-${l.id}`} plain onPress={() => apriNellEditor($, percorso, opzioneEditor)}>
+          <Button key={`apri-${l.id}`} plain onPress={() => apriOutput($, percorso, opzioni)}>
             <Text color="cyan">↗ apri</Text>
           </Button>
         ) : null}
