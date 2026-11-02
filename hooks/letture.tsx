@@ -3,7 +3,8 @@ import type { EngineInterface, On, RenderElement, RenderInput } from 'claude-cod
 import { apri } from './apri'
 import { NOMI_EDITOR, apriInEditor, editorPer, rigaModificata } from './editor'
 import { type Size, fitCells, pngSize } from './layout'
-import { cartellaSessione } from './sessione'
+import { lavoroAvviato } from './lavori'
+import { fileOutputLavoro, fileOutputNelTesto, ricordaFileOutput } from './sessione'
 import { apriUrl, etichettaUrl, urlNelTesto } from './url'
 
 export type Anteprima = 'immagini' | 'blocchi' | 'etichette'
@@ -215,14 +216,11 @@ function aggiungiTrovati(id: string, nuovi: Trovati) {
   trovatiDa.set(id, { ...trovatiDa.get(id), ...nuovi })
 }
 
-// Il file di output di un comando in background è tasks/<id>.output nella cartella della sessione.
 async function sorvegliaOutput($: EngineInterface, id: string, taskId: string, comando: string) {
-  const cartella = await cartellaSessione($)
-  if (!cartella) return
-  const file = `${cartella}/tasks/${taskId}.output`
   const fine = (await $.clock.now()) + SORVEGLIANZA_MS
   const giro = async () => {
-    const url = urlNelTesto(await $.fs.read(file).catch(() => ''), comando)
+    const file = await fileOutputLavoro($, taskId)
+    const url = file ? urlNelTesto(await $.fs.read(file).catch(() => ''), comando) : []
     if (url.length) {
       aggiungiTrovati(id, { url })
       $.ui.invalidate('ui.render')
@@ -233,7 +231,7 @@ async function sorvegliaOutput($: EngineInterface, id: string, taskId: string, c
 
 type EsitoComando = { result?: unknown; isError?: boolean }
 
-async function conTrovati<R>($: EngineInterface, id: string, comando: string, esegui: () => Promise<R>) {
+async function conTrovati<R>($: EngineInterface, id: string, comando: string, descrizione: string | undefined, esegui: () => Promise<R>) {
   const inizio = await $.clock.now()
   const esito = await esegui()
   try {
@@ -241,7 +239,12 @@ async function conTrovati<R>($: EngineInterface, id: string, comando: string, es
     const output = result as { stdout?: unknown; stderr?: unknown; backgroundTaskId?: unknown } | undefined
     if (output && !isError) {
       const taskId = stringa(output.backgroundTaskId)
-      if (taskId) void sorvegliaOutput($, id, taskId, comando)
+      if (taskId) {
+        const file = fileOutputNelTesto((esito as { text?: unknown }).text?.toString() ?? '')
+        if (file) ricordaFileOutput(file)
+        await lavoroAvviato($, taskId, descrizione || comando, comando)
+        void sorvegliaOutput($, id, taskId, comando)
+      }
       else {
         const prodotti = await cercaProdotti($, comando, inizio)
         const url = urlNelTesto(`${stringa(output.stdout) ?? ''}\n${stringa(output.stderr) ?? ''}`, comando)
@@ -275,8 +278,8 @@ export function registraLetture(on: On, anteprima: Promise<Anteprima> | null, op
       return esito
     })
 
-  on('tool.call', { tool: 'Bash' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, () => next(e)))
-  on('tool.call', { tool: 'PowerShell' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, () => next(e)))
+  on('tool.call', { tool: 'Bash' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, e.description, () => next(e)))
+  on('tool.call', { tool: 'PowerShell' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, e.description, () => next(e)))
 
   const daMostrare = (c: Chiamata) => daAprire(c, anteprima !== null, c.tool_use_id ? trovatiDa.get(c.tool_use_id) : undefined)
 

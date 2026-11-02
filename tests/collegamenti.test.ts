@@ -85,7 +85,7 @@ function ospite(on: On): Ospite {
   on('session.root', () => ({ value: 'E:\\work' }))
   on('session.cwd', () => ({ value: 'E:\\work' }))
   on('session.usage', () => ({ value: { context: { window: 200_000 }, rateLimits: [] } }) as never)
-  on('fs.exists', ($, e) => ({ value: Object.keys(o.file).some(p => p.startsWith(`${posix(e.path)}/`)) }))
+  on('fs.exists', ($, e) => ({ value: Object.keys(o.file).some(p => p === posix(e.path) || p.startsWith(`${posix(e.path)}/`)) }))
   on('fs.read', ($, e) => {
     const contenuto = o.file[posix(e.path)]
     return contenuto === undefined ? { deny: 'ENOENT' } : { value: contenuto }

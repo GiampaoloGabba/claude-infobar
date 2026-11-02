@@ -41,3 +41,31 @@ export async function cartellaSessione($: EngineInterface): Promise<string | und
   }
   return undefined
 }
+
+// Dopo /clear o una ripresa l'id di sessione cambia, ma Claude Code continua a scrivere l'output dei comandi
+// in background nella cartella della prima sessione del processo. La cartella giusta la dice Claude Code
+// stesso, nel testo con cui un comando parte in background e nelle notifiche di fine: la si ricorda da lì.
+let cartellaTasks: string | undefined
+
+/** Ricorda la cartella degli output da un percorso `.../tasks/<id>.output` dato da Claude Code. */
+export function ricordaFileOutput(path: string) {
+  const cartella = normalizzaPercorso(path).replace(/\/[^/]+$/, '')
+  if (cartella.endsWith('/tasks')) cartellaTasks = cartella
+}
+
+/** Il percorso di un file di output nel testo di Claude Code (avvio in background, notifica), se c'è. */
+export function fileOutputNelTesto(testo: string): string | null {
+  return testo.match(/(?:[A-Za-z]:[\\/]|\/)[^"'<>\n]*?[\\/]tasks[\\/][^"'<>\\/\n]+?\.output/)?.[0] ?? null
+}
+
+async function esiste($: EngineInterface, path: string) {
+  return $.fs.exists(path).catch(() => false)
+}
+
+/** Il file di output di un lavoro in background, o null se non c'è (ancora, o non più). */
+export async function fileOutputLavoro($: EngineInterface, id: string): Promise<string | null> {
+  if (cartellaTasks && (await esiste($, `${cartellaTasks}/${id}.output`))) return `${cartellaTasks}/${id}.output`
+  const sessione = await cartellaSessione($)
+  if (sessione && (await esiste($, `${sessione}/tasks/${id}.output`))) return `${sessione}/tasks/${id}.output`
+  return null
+}

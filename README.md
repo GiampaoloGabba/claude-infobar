@@ -38,7 +38,7 @@ In fondo alla seconda riga ci sono i limiti di utilizzo dell'abbonamento: la fin
 
 La seconda riga parte dal contesto: token usati, percentuale della finestra e una barra che diventa gialla oltre il 50% e rossa oltre l'80%. Si aggiorna dopo ogni strumento che Claude usa, quindi la vedi salire anche durante un turno lungo. Al 70% e all'85% arriva un avviso.
 
-Attaccato alla barra c'è lo stato della compattazione, con un simbolo solo. `✓` grigio: non gira niente in background, puoi compattare. `◷ 3` giallo: ci sono 3 lavori ancora attivi (subagent, workflow, Monitor o comandi) e compattare adesso rischia di farteli perdere di vista: aspetta che finiscano prima di `/compact`. `…` grigio: Claude sta lavorando.
+Attaccato alla barra c'è lo stato della compattazione, con un simbolo solo. `✓` grigio: non gira niente in background, puoi compattare. `◷ 3` giallo: ci sono 3 lavori ancora attivi (subagent, workflow, Monitor o comandi) e compattare adesso rischia di farteli perdere di vista: aspetta che finiscano prima di `/compact`. `…` grigio: Claude sta lavorando. Un clic su `◷ 3` apre il pannello dei lavori (vedi sotto).
 
 In fondo compaiono le autorizzazioni attive e, se c'è, l'orario della ripresa automatica.
 
@@ -49,6 +49,7 @@ In fondo compaiono le autorizzazioni attive e, se c'è, l'orario della ripresa a
 | `/autorizza [testo]` | Aggiunge un'autorizzazione di sessione. Ci sono scorciatoie per `db`, `prod`, `deploy`, `commit` e `push`. Senza argomenti mostra l'elenco. |
 | `/revoca <n\|tutte>` | Toglie un'autorizzazione, o tutte. |
 | `/autonomo` | Accende o spegne la modalità autonoma: Claude porta a termine il lavoro concordato senza fermarsi a chiedere conferme. |
+| `/lavori` | Apre il pannello dei lavori in background, con output e `ferma`. |
 | `/ripresa [annulla]` | Mostra la ripresa automatica programmata, o la annulla. |
 | `/account [alias\|numero]` | Apre il pannello degli account di cswap; con un alias o un numero fa lo switch del profilo principale. |
 
@@ -119,6 +120,20 @@ Sotto un blocco di una risposta di Claude c'è una riga grigia con `⧉ copia`, 
 La riga c'è sotto i blocchi con del codice, sotto quelli di almeno tre righe e sotto l'ultimo blocco di ogni risposta, anche se è una frase sola (compare appena Claude ha finito). Le frasi brevi tra un tool e l'altro ("Ora controllo la cartella.") restano senza.
 
 Sulla riga di un comando Bash o PowerShell, a destra, c'è `⧉ copia comando`. Copia come `/copy`, quindi funziona anche via SSH dove il terminale accetta OSC 52. L'opzione `copia` su `hover` toglie le righe e mostra i pulsanti a destra dell'ultima riga solo con il puntatore sul messaggio (dove il terminale segue il mouse); `no` li toglie.
+
+## Lavori in background
+
+Un clic sul `◷ 3` della barra, o `/lavori`, apre un pannello con i lavori in background della sessione, in due sezioni. In alto `IN CORSO`: ogni lavoro in una cornice, con l'icona del tipo (`$` comando, `◆` subagent, `⚙` workflow, `◉` Monitor), la descrizione, da quanto gira, la riga di comando e le sue ultime tre righe di output, aggiornate ogni due secondi finché il pannello resta aperto: per un server di sviluppo si vede subito se è partito o se è caduto. Sotto `FINITI`: una riga per lavoro, con `✓`, `✗` se è fallito o `■` se è stato fermato, e da quanto. I finiti restano per dieci minuti.
+
+I pulsanti, in azzurro:
+
+- `▾ output` apre l'output intero (le ultime 40 righe) dentro il pannello, `▴ output` lo richiude; c'è anche sui lavori finiti, finché il file esiste.
+- `↗ apri` apre il file dell'output nell'editor (quello dell'opzione `editor`), sull'ultima riga.
+- `■ ferma`, in rosso, solo sui lavori in corso: al primo clic diventa `■ ferma? clicca di nuovo` (la richiesta scade dopo qualche secondo), al secondo lo ferma come farebbe Claude con TaskStop. Claude riceve la notifica e ne tiene conto.
+
+Un lavoro che Claude ferma da sé (TaskStop) esce subito dal conto. Uno fermato dall'interfaccia di Claude Code esce al riepilogo di fine turno, perché la mod non ne riceve notizia prima.
+
+La durata parte da quando la mod ha visto il lavoro: per un comando lanciato in background è la partenza; per un workflow o un Monitor, che compaiono solo nel riepilogo di fine turno, può essere un po' dopo.
 
 ## Codex
 

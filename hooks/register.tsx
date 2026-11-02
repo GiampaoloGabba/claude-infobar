@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, RenderInput, Register, SessionContextUsage, SessionRateLimit, Timer } from 'claude-code'
 
-import type { Attivita, ImmagineIncollata, Ripresa } from '../types'
+import type { ImmagineIncollata, Ripresa } from '../types'
 import {
   PANNELLO_CONTI,
   aggiornaContiSeVecchi,
@@ -15,6 +15,7 @@ import {
   pulsanteConto,
 } from './account'
 import { apri } from './apri'
+import { PANNELLO_LAVORI, apriLavori, attivitaInCorso, disegnaLavori, lavoriDaAgenti, lavoriDaRiepilogo, lavoriInCorso, lavoroDaNotifica, lavoroFermato } from './lavori'
 import { cartellaSessione } from './sessione'
 import { aggiornaCodex, codexDaMostrare } from './codex-uso'
 import { registraCopia, rispostaFinita } from './copia'
@@ -58,8 +59,6 @@ const percent = atom({ plugin: 'infobar', key: 'percent' } as const, null)
 const tokens = atom({ plugin: 'infobar', key: 'tokens' } as const, null)
 const avvisato = atom({ plugin: 'infobar', key: 'avvisato' } as const, 0)
 const turnoAttivo = atom({ plugin: 'infobar', key: 'turnoAttivo' } as const, false)
-const agenti = atom({ plugin: 'infobar', key: 'agenti' } as const, [])
-const inBackground = atom({ plugin: 'infobar', key: 'inBackground' } as const, [])
 const ripresa = atom({ plugin: 'infobar', key: 'ripresa' } as const, null)
 const tentativi = atom({ plugin: 'infobar', key: 'tentativi' } as const, 0)
 const agentiFalliti = atom({ plugin: 'infobar', key: 'agentiFalliti' } as const, [])
@@ -70,10 +69,6 @@ const immagini = atom({ plugin: 'infobar', key: 'immagini' } as const, [] as Imm
 
 const SOGLIE = [85, 70]
 const MAX_TENTATIVI = 4
-
-async function attivitaInCorso($: EngineInterface): Promise<Attivita[]> {
-  return [...(await read($, agenti)), ...(await read($, inBackground))]
-}
 
 let fileHead: string | null = null
 let timerRipresa: Timer | null = null
@@ -123,13 +118,6 @@ async function aggiornaTutto($: EngineInterface, conContesto = true) {
       await update($, limitiVistiAlle, () => salvati.at)
     }
   }
-}
-
-async function aggiornaAgenti($: EngineInterface) {
-  const attivi = (await $.agent.list())
-    .filter(a => a.status === 'running' || a.status === 'pending')
-    .map(a => ({ tipo: 'agent', descrizione: a.description }))
-  if (JSON.stringify(await read($, agenti)) !== JSON.stringify(attivi)) await update($, agenti, () => attivi)
 }
 
 async function registraLimiti($: EngineInterface, finestre: readonly SessionRateLimit[]) {
@@ -423,6 +411,7 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'autorizza', description: 'Aggiunge un\'autorizzazione di sessione (alias: db, prod, deploy, commit, push)', argumentHint: '[testo|alias]' })
     await $.command.register({ name: 'revoca', description: 'Revoca un\'autorizzazione di sessione', argumentHint: '<n|tutte>' })
     await $.command.register({ name: 'autonomo', description: 'Attiva o disattiva la modalità autonoma di sessione' })
+    await $.command.register({ name: 'lavori', description: 'Apre il pannello dei lavori in background: comandi, subagent, workflow, con output e stop', immediate: true })
     await $.command.register({ name: 'ripresa', description: 'Stato della ripresa automatica dopo un limite', argumentHint: '[annulla]', immediate: true })
     // Dove la sessione ha un login suo (app desktop) la barra non c'è e cswap non la riguarda: niente timer.
     if ((conAccount || conCodex) && !(await loginProprio($))) {
@@ -464,21 +453,28 @@ export const register: Register = (on, options) => {
         const nome = agente ? `${agente.description} (${agente.id})` : e.agentId
         await update($, agentiFalliti, l => (l.includes(nome) ? l : [...l, nome].slice(-10)))
       }
-      await aggiornaAgenti($)
+      await lavoriDaAgenti($)
       return next(e)
     }
     if ((await read($, turnoAttivo)) !== false) await update($, turnoAttivo, () => false)
     if (e.reason === 'answer') if ((await read($, tentativi)) !== 0) await update($, tentativi, () => 0)
     await aggiornaIntestazione($)
-    await aggiornaAgenti($)
+    await lavoriDaAgenti($)
     const esito = await next(e)
     if (e.reason === 'answer') rispostaFinita($, esito.text)
     return esito
   })
 
+  on('tool.call', { tool: 'TaskStop' }, async ($, e, next) => {
+    const esito = await next(e)
+    const id = e.task_id ?? e.shell_id
+    if (id && 'result' in esito && !esito.isError) await lavoroFermato($, id)
+    return esito
+  })
+
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const esito = await next(e)
-    await aggiornaAgenti($)
+    await lavoriDaAgenti($)
     return esito
   })
 
@@ -497,6 +493,7 @@ export const register: Register = (on, options) => {
 
   on('prompt.submit', async ($, e, next) => {
     if (conAnteprime) sincronizza($, '')
+    if (e.origin.kind === 'task-notification') await lavoroDaNotifica($, e.text)
     const daPersona = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
     if (daPersona) {
       if (await read($, ripresa)) await annullaRipresa($)
@@ -509,10 +506,7 @@ export const register: Register = (on, options) => {
     if ((await read($, turnoAttivo)) !== false) await update($, turnoAttivo, () => false)
     const livello = e.effort?.level
     if (livello && (await read($, effort)) !== livello) await update($, effort, () => livello)
-    const attivi = (e.background_tasks ?? [])
-      .filter(t => t.type !== 'subagent')
-      .map(t => ({ tipo: t.type, descrizione: t.name ?? t.description }))
-    if (JSON.stringify(await read($, inBackground)) !== JSON.stringify(attivi)) await update($, inBackground, () => attivi)
+    await lavoriDaRiepilogo($, e.background_tasks ?? [])
     return next(e)
   })
 
@@ -640,6 +634,12 @@ export const register: Register = (on, options) => {
   }).catch(() => ({ text: 'Comando /account non riuscito: vedi il log di debug.' }))
 
   on('ui.render', { component: 'Pane', requestId: PANNELLO_CONTI }, async ($, e) => disegnaConti($, e))
+  on('ui.render', { component: 'Pane', requestId: PANNELLO_LAVORI }, async ($, e) => disegnaLavori($, e, typeof options.editor === 'string' ? options.editor : undefined))
+
+  on('command.run', { command: 'lavori' }, async $ => {
+    await apriLavori($)
+    return { text: 'Pannello dei lavori aperto.' }
+  })
 
   // Sul desktop l'app mostra già queste informazioni a modo suo: la barra è solo per il terminale. Il filtro
   // sta nel matcher e non nel corpo, perché il desktop riserva lo spazio della banda a ogni plugin che la aggancia.
@@ -655,7 +655,7 @@ export const register: Register = (on, options) => {
     const ora = await $.clock.now()
     const p = await read($, percent)
     const t = await read($, tokens)
-    const occupati = [...(await read($, agenti)), ...(await read($, inBackground))]
+    const occupati = await lavoriInCorso($)
     const turno = await read($, turnoAttivo)
     const r = await read($, ripresa)
     const lista = await read($, autorizzazioni)
@@ -689,8 +689,10 @@ export const register: Register = (on, options) => {
           <Text color={colore}>{p === null ? '-' : `${p}%`}</Text>
           {p === null ? null : <Text color={colore}>{` ${barra(p)}`}</Text>}
           <Text>{' '}</Text>
-          {occupati.length ? (
-            <Text color="yellow">{`◷ ${occupati.length}`}</Text>
+          {occupati ? (
+            <Button key="lavori" plain onPress={() => void apriLavori($)}>
+              <Text color="yellow">{`◷ ${occupati}`}</Text>
+            </Button>
           ) : turno ? (
             <Text dimColor>…</Text>
           ) : (

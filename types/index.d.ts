@@ -1,5 +1,19 @@
 export type Attivita = { tipo: string; descrizione: string }
 
+/** Un lavoro in background della sessione: comando, subagent, workflow, Monitor. */
+export type Lavoro = {
+  id: string
+  /** `shell`, `subagent`, `workflow`, `monitor`, o il tipo che riporta Claude Code. */
+  tipo: string
+  descrizione: string
+  /** La riga di comando, per i comandi. */
+  comando?: string
+  /** Quando la mod l'ha visto la prima volta: per quelli scoperti a fine turno, un po' dopo la partenza. */
+  inizio: number
+  stato: 'in corso' | 'completato' | 'fallito' | 'fermato' | 'finito'
+  fine?: number
+}
+
 export type Limite = { kind: string; percentUsed: number; resetsAt?: string }
 
 export type Ripresa = { at: number; motivo: string; tentativi: number }
@@ -54,8 +68,20 @@ declare module 'claude-code' {
       tokens: number | null
       avvisato: number
       turnoAttivo: boolean
-      agenti: Attivita[]
-      inBackground: Attivita[]
+      lavori: Lavoro[]
+      /**
+       * L'output dei lavori che ne hanno uno, per id: il file, le ultime righe e, per quelli aperti nel
+       * pannello, le ultime 40. Si legge solo a pannello aperto, dal timer: il disegno non tocca il disco.
+       */
+      outputLavori: Record<string, { file: string; coda: string[]; intero?: string[] }>
+      /** Il lavoro su cui è stato premuto "ferma" una volta: il secondo clic lo ferma. */
+      fermaChiesto: string | null
+      /** Cambia ogni pochi secondi a pannello aperto, perché le durate si aggiornino. */
+      battito: number
+      /** I lavori di cui il pannello mostra l'output per intero. */
+      outputAperti: string[]
+      /** Cosa è andato storto nell'ultimo aggiornamento del pannello, e dove ha cercato l'output. */
+      diagnosiLavori: string | null
       ripresa: Ripresa | null
       tentativi: number
       agentiFalliti: string[]
