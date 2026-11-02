@@ -1,7 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On, ToolGroupCall } from 'claude-code'
 
-import { daAprire, percorsiNelComando } from '../hooks/letture'
+import { accorcia, daAprire, percorsiNelComando } from '../hooks/letture'
+import { fromBase64 } from '../hooks/raster'
 
 // 40 x 20 RGBA, rosso sopra e blu sotto.
 const ROSSO_SU_BLU =
@@ -44,10 +45,11 @@ function ospite(on: On) {
 
 test('solo le letture riuscite di immagini hanno un\'anteprima', () => {
   expect(daAprire(lettura('a', { ...PNG, dimensions: { displayWidth: 1600, displayHeight: 1160 } }))).toEqual([
-    { id: 'a', tipo: 'file', destinazione: PATH, png: ROSSO_SU_BLU, size: { width: 1600, height: 1160 } },
+    { id: 'a', tipo: 'file', destinazione: PATH, png: ROSSO_SU_BLU, size: { width: 1600, height: 1160 }, dati: { base64: ROSSO_SU_BLU, formato: 'png' } },
   ])
   expect(daAprire(lettura('b', PNG))[0]?.size).toEqual({ width: 40, height: 20 })
-  expect(daAprire(lettura('c', { base64: '/9j/4AAQ', type: 'image/jpeg', originalSize: 9 }))).toMatchObject([{ id: 'c', png: null }])
+  expect(daAprire(lettura('c', { base64: '/9j/4AAQ', type: 'image/jpeg', originalSize: 9 }))).toMatchObject([{ id: 'c', png: null, dati: { formato: 'jpeg' } }])
+  expect(daAprire(lettura('w', { base64: 'UklGRg', type: 'image/webp', originalSize: 9 }))[0]?.dati).toBeUndefined()
   expect(daAprire({ ...lettura('d', PNG), isErrored: true })).toEqual([])
   expect(daAprire({ ...lettura('e', PNG), output: { type: 'text', file: { content: 'ciao' } } })).toEqual([])
   expect(daAprire({ ...lettura('f', PNG), tool: 'Bash' })).toEqual([])
@@ -75,6 +77,25 @@ test('dove il terminale non disegna immagini resta solo il link', { options: { a
   expect(await ui.find({ type: 'Text', text: 'qf-tab.png' })).toBeDefined()
   await ui.press({ key: 'apri-r1' })
   expect(comandi).toEqual([['explorer.exe', 'V:\\Temp\\qf-tab.png']])
+})
+
+test('con miniatureLette la lettura a blocchi mostra prima … e poi i mezzi blocchi', { options: { anteprime: 'blocchi', miniatureLette: 'si' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  ospite(on)
+  const prima = await $.ui.mount({ ...gruppo([lettura('r1', PNG)]), surface: 'terminal' })
+  expect(await prima.find({ type: 'Raster' })).toBeUndefined()
+  expect(await prima.find({ type: 'Text', text: '…' })).toBeDefined()
+  await prima.unmount()
+
+  await clock.advance(100)
+  const ui = await $.ui.mount({ ...gruppo([lettura('r1', PNG)]), surface: 'terminal' })
+  const raster = await ui.find({ type: 'Raster' })
+  const { columns, rows, cells } = raster?.props as { columns: number; rows: number; cells: string }
+  const parole = new Uint32Array(fromBase64(cells).buffer)
+  expect([...parole.subarray(0, 3)]).toEqual([0x2580, 0xff0000, 0xff0000])
+  const ultima = (columns * rows - 1) * 3
+  expect([...parole.subarray(ultima, ultima + 3)]).toEqual([0x2580, 0x0000ff, 0x0000ff])
+  expect(await ui.find({ type: 'Button', key: 'apri-r1' })).toBeDefined()
 })
 
 test('un JPEG ha solo il clic per aprirlo', { options: { anteprime: 'immagini' } }, async ($, on) => {
@@ -175,4 +196,77 @@ test('sotto un comando compaiono i documenti che ha scritto, non quelli vecchi o
   expect(await ui.find({ type: 'Text', text: 'manca.xlsx' })).toBeUndefined()
   await ui.press({ key: 'apri-p1-0' })
   expect(comandi.at(-1)).toEqual(['explorer.exe', 'E:' + String.fromCharCode(92) + 'work' + String.fromCharCode(92) + 'report.pdf'])
+})
+
+function screenshotCreato(on: On, ora: number, stdout = '') {
+  on('session.cwd', () => ({ value: 'V:/Temp' }))
+  on('fs.stat', ($, e) =>
+    e.path.replaceAll(String.fromCharCode(92), '/') === PATH
+      ? { value: { kind: 'file', size: 120, mtimeMs: ora + 500, isLink: false } }
+      : { deny: 'ENOENT' },
+  )
+  on('fs.read', () => ({ value: { base64: ROSSO_SU_BLU } }))
+  on('session.usage', () => ({ value: { context: { window: 200_000 }, rateLimits: [] } }) as never)
+  on('tool.call', () => ({ result: { stdout, stderr: '', interrupted: false } }))
+}
+
+test('un file dal nome composto mentre il comando gira si trova nell\'output, ma non da chi elenca file', { options: { anteprime: 'blocchi' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  ospite(on)
+  screenshotCreato(on, clock.now(), 'FullName : V:\\Temp\\qf-tab.png\r\nLength   : 2020594\r\n')
+  const composto = `$path = 'V:\\Temp\\shot-' + (Get-Date -Format 'HHmmss') + '.png'; $bmp.Save($path); Get-Item $path | Format-List`
+  await $.tool.call({ tool: 'PowerShell', command: composto, tool_use_id: 'p1' } as never)
+  await $.tool.call({ tool: 'PowerShell', command: 'Get-ChildItem V:\\Temp', tool_use_id: 'p2' } as never)
+
+  const riga = (id: string, command: string) => ({ tool_use_id: id, tool: 'PowerShell', input: { command }, output: { stdout: '' }, isRunning: false, isErrored: false, isInterrupted: false })
+  const ui = await $.ui.mount({ ...gruppo([riga('p1', composto), riga('p2', 'Get-ChildItem V:\\Temp')]), surface: 'terminal' })
+  expect(await ui.find({ type: 'Button', key: 'apri-p1-0' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'apri-p2-0' })).toBeUndefined()
+})
+
+const SCREENSHOT = `$bmp.Save('${PATH}', [System.Drawing.Imaging.ImageFormat]::Png)`
+const comandoScreenshot = { tool_use_id: 'p1', tool: 'PowerShell', input: { command: SCREENSHOT }, output: { stdout: '' }, isRunning: false, isErrored: false, isInterrupted: false }
+
+test('un\'immagine creata da un comando ha il link e la miniatura letta dal disco', { options: { anteprime: 'blocchi', miniatureLette: 'si' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const comandi = ospite(on)
+  screenshotCreato(on, clock.now())
+  await $.tool.call({ tool: 'PowerShell', command: SCREENSHOT, tool_use_id: 'p1' } as never)
+
+  await (await $.ui.mount({ ...gruppo([comandoScreenshot]), surface: 'terminal' })).unmount()
+  await clock.advance(100)
+  const ui = await $.ui.mount({ ...gruppo([comandoScreenshot]), surface: 'terminal' })
+  const raster = await ui.find({ type: 'Raster' })
+  const parole = new Uint32Array(fromBase64((raster?.props as { cells: string }).cells).buffer)
+  expect([...parole.subarray(0, 3)]).toEqual([0x2580, 0xff0000, 0xff0000])
+  await ui.press({ key: 'apri-p1-0' })
+  expect(comandi.at(-1)).toEqual(['explorer.exe', 'V:\\Temp\\qf-tab.png'])
+})
+
+test('creata e poi letta nello stesso gruppo, l\'immagine ha un link solo', { options: { anteprime: 'immagini' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  ospite(on)
+  screenshotCreato(on, clock.now())
+  await $.tool.call({ tool: 'PowerShell', command: SCREENSHOT, tool_use_id: 'p1' } as never)
+
+  const ui = await $.ui.mount({ ...gruppo([comandoScreenshot, lettura('r1', PNG, 'V:\\Temp\\qf-tab.png')]), surface: 'terminal' })
+  expect(await ui.find({ type: 'Button', key: 'apri-p1-0' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'apri-r1' })).toBeDefined()
+  expect((await ui.find({ type: 'Image' }))?.props).toMatchObject({ source: { png: ROSSO_SU_BLU } })
+})
+
+test('un nome lungo si accorcia dal mezzo, con la coda e l\'estensione', () => {
+  expect(accorcia('screenshot-20261102-143616.png', 20)).toBe('screenshot…43616.png')
+  expect(accorcia('prova.png', 20)).toBe('prova.png')
+  expect(accorcia('a'.repeat(30), 10)).toBe(`${'a'.repeat(6)}…aaa`)
+})
+
+test('sotto l\'immagine solo la freccia e il nome, stretto quanto il riquadro', { options: { anteprime: 'immagini' } }, async ($, on) => {
+  mock.clock(on)
+  ospite(on)
+  const lungo = 'V:/Temp/screenshot-di-una-finestra-molto-lunga-20261102-143616.png'
+  const ui = await $.ui.mount({ ...gruppo([lettura('r1', PNG, lungo)]), surface: 'terminal' })
+  const { columns } = (await ui.find({ type: 'Image' }))?.props as { columns: number }
+  expect(await ui.find({ type: 'Text', text: '↗ ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: accorcia('screenshot-di-una-finestra-molto-lunga-20261102-143616.png', Math.max(columns - 2, 16)) })).toBeDefined()
 })

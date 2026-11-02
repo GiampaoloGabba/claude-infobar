@@ -467,7 +467,10 @@ export const register: Register = (on, options) => {
   const conAccount = options.account !== 'no'
   const conCodex = options.codex !== 'no'
   if (scelta === 'immagini' || scelta === 'blocchi' || scelta === 'etichette') fissaAnteprima(scelta)
-  registraLetture(on, conAnteprime ? anteprima : null, { editor: typeof options.editor === 'string' ? options.editor : undefined })
+  registraLetture(on, conAnteprime ? anteprima : null, {
+    editor: typeof options.editor === 'string' ? options.editor : undefined,
+    miniatureLette: options.miniatureLette === 'si',
+  })
   if (options.copia !== 'no') registraCopia(on, options.copia === 'hover' ? 'hover' : 'sempre')
 
   on('session.start', async ($, e, next) => {

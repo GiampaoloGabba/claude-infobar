@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { comandoEditor, rigaModificata, scegliEditor } from '../hooks/editor'
-import { etichettaUrl, urlNelTesto } from '../hooks/url'
+import { etichettaUrl, stampaFile, urlDaTenere, urlNelTesto } from '../hooks/url'
 
 const BS = String.fromCharCode(92)
 const nativo = (p: string) => p.replaceAll('/', BS)
@@ -59,11 +59,35 @@ test('gli URL dell\'output: senza colori, senza punteggiatura finale, senza quel
   expect(urlNelTesto('http://a.it http://b.it http://c.it http://d.it')).toHaveLength(3)
 })
 
+test('niente URL dai comandi che stampano file, né il suggerimento di PR di git push', () => {
+  const codice = "expect(etichettaUrl('https://github.com/o/r/pull/42')).toBe('PR #42')"
+  expect(urlNelTesto(codice, 'grep -n "PR" tests/*.ts | head -20')).toEqual([])
+  expect(urlNelTesto(codice, 'cd /e/repo && sed -n 1,40p tests/a.ts')).toEqual([])
+  expect(urlNelTesto(codice, `Get-Content tests${BS}a.ts`)).toEqual([])
+  expect(urlNelTesto(codice, 'git -C x status; git show HEAD')).toEqual([])
+  expect(urlNelTesto('To https://github.com/o/r.git\nremote:   https://github.com/o/r/pull/new/feat', 'git push 2>&1 | tail -2')).toEqual([
+    'https://github.com/o/r.git',
+  ])
+  expect(stampaFile('pnpm dev | tee log.txt')).toBe(false)
+  expect(stampaFile('C:/tools/rg.exe -n url src')).toBe(true)
+  expect(stampaFile(`C:${BS}tools${BS}rg.exe -n url src`)).toBe(true)
+})
+
+test('accanto al repository il profilo sparisce, la radice di un server resta', () => {
+  expect(urlDaTenere(['https://github.com/GiampaoloGabba', 'https://github.com/GiampaoloGabba/claude-infobar'])).toEqual([
+    'https://github.com/GiampaoloGabba/claude-infobar',
+  ])
+  expect(urlDaTenere(['https://github.com/o/r.git', 'https://github.com/o/r/'])).toEqual(['https://github.com/o/r.git'])
+  expect(urlDaTenere(['http://localhost:5173/', 'http://localhost:5173/admin'])).toEqual(['http://localhost:5173/', 'http://localhost:5173/admin'])
+  expect(urlDaTenere(['https://github.com/o/r', 'https://gitlab.com/o/r/x'])).toHaveLength(2)
+  expect(urlDaTenere(['https://example.com/doc', 'https://example.com/documenti'])).toHaveLength(2)
+})
+
 test('le etichette degli URL: PR per numero, host e percorso per il resto', () => {
   expect(etichettaUrl('https://github.com/o/r/pull/42')).toBe('PR #42')
   expect(etichettaUrl('https://gitlab.com/o/r/-/merge_requests/7')).toBe('PR #7')
-  expect(etichettaUrl('https://github.com/o/r/pull/new/feature-x')).toBe('nuova PR')
   expect(etichettaUrl('http://localhost:5173/')).toBe('localhost:5173')
+  expect(etichettaUrl('https://github.com/o/r.git')).toBe('github.com/o/r')
   expect(etichettaUrl(`https://example.com/${'a'.repeat(80)}`)).toHaveLength(50)
 })
 
@@ -139,14 +163,14 @@ test('un URL nell\'output di un comando diventa un link che apre il browser', as
   mock.clock(on)
   const o = ospite(on)
   on('tool.call', () => ({
-    result: { stdout: 'remote: Create a pull request:\nremote:   https://github.com/o/r/pull/new/feat\n', stderr: '', interrupted: false },
+    result: { stdout: 'https://github.com/o/r/pull/42\n', stderr: '', interrupted: false },
   }))
-  await $.tool.call({ tool: 'Bash', command: 'git push -u origin feat', tool_use_id: 'b1' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --fill', tool_use_id: 'b1' } as never)
 
   const ui = await $.ui.mount(rigaRisultato('Bash', 'b1', { stdout: '' }))
-  expect(await ui.find({ type: 'Text', text: 'nuova PR' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'PR #42' })).toBeDefined()
   await ui.press({ key: 'apri-b1-url-0' })
-  expect(o.comandi.at(-1)).toEqual(['rundll32.exe', 'url.dll,FileProtocolHandler', 'https://github.com/o/r/pull/new/feat'])
+  expect(o.comandi.at(-1)).toEqual(['rundll32.exe', 'url.dll,FileProtocolHandler', 'https://github.com/o/r/pull/42'])
 })
 
 test('un server in background: il link compare quando il suo output stampa l\'indirizzo', async ($, on) => {

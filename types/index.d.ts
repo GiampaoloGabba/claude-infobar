@@ -86,6 +86,8 @@ declare module 'claude-code' {
       risposteFinite: string[]
       /** Per chiamata di Bash o PowerShell (il tool_use_id): i documenti scritti e gli URL dell'output. */
       trovatiComandi: StateFamily<{ prodotti: string[]; url: string[] }>
+      /** Per lettura di immagine (il tool_use_id): la miniatura a blocchi decodificata, 'errore' dove non si è potuto. */
+      miniatureLette: StateFamily<{ width: number; height: number; rgba: string } | 'errore' | null>
       statoGit: StatoGit
       /** I file di cui il pannello mostra il diff, e il diff già letto da git: il disegno non lancia comandi. */
       diffAperti: string[]
