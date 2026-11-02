@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+import { letturaPngGrande } from '../hooks/file'
 import { decodeImage, formatOf, imageSize } from '../hooks/formati'
 import { inflateZlib } from '../hooks/inflate'
 import { fitCells, fitRow, imageNumbers, pngSize } from '../hooks/layout'
@@ -186,6 +187,7 @@ type Ospite = {
   file: Record<string, string>
   // Le dimensioni che fs.list dichiara al posto di quelle dei byte, per i file oltre ciò che si può leggere.
   dimensioni?: Record<string, number>
+  lettura?: Promise<void>
   bozza: string
   chiamate: Record<string, number>
   comandi: string[][]
@@ -225,8 +227,9 @@ function ospite(on: On, init: Omit<Ospite, 'chiamate' | 'comandi'>): Ospite {
       }))
     return { value: voci }
   })
-  on('fs.read', ($, e) => {
+  on('fs.read', async ($, e) => {
     conta('fs.read')
+    await o.lettura
     return { value: { base64: o.file[posix(e.path)] ?? '' } }
   })
   on('prompt.submit', ($, e) => ({ text: e.text }))
@@ -296,11 +299,118 @@ test('su Windows la cache è in %TEMP%\\claude, un JPEG passa inline e "apri" us
   expect(o.comandi).toEqual([['explorer.exe', `${cartella.replaceAll('/', '\\')}\\1.jpg`]])
 })
 
-test('il WebP ha la sua etichetta; oltre i 4 MiB un PNG lo legge il terminale, un JPEG no', { options: { anteprime: 'immagini' } }, async ($, on) => {
+test('un PNG oltre i 4 MiB va al terminale per percorso solo da kitty, Ghostty o WezTerm locali, altrove lo legge un processo fino a 32 MiB', () => {
+  const MiB = 1024 * 1024
+  expect(letturaPngGrande(10 * MiB, { KITTY_WINDOW_ID: '1' })).toBe('percorso')
+  expect(letturaPngGrande(10 * MiB, { TERM_PROGRAM: 'WezTerm' })).toBe('percorso')
+  expect(letturaPngGrande(10 * MiB, { KITTY_WINDOW_ID: '1', SSH_CONNECTION: '10.0.0.2 50000 10.0.0.1 22' })).toBe('processo')
+  expect(letturaPngGrande(10 * MiB, { GHOSTTY_RESOURCES_DIR: '/opt/ghostty', SSH_TTY: '/dev/pts/0' })).toBe('processo')
+  expect(letturaPngGrande(10 * MiB, { TERM_PROGRAM: 'MosaicManager' })).toBe('processo')
+  expect(letturaPngGrande(10 * MiB, {})).toBe('processo')
+  expect(letturaPngGrande(33 * MiB, { TERM_PROGRAM: 'MosaicManager' })).toBe('troppo')
+  expect(letturaPngGrande(33 * MiB, { KITTY_WINDOW_ID: '1' })).toBe('percorso')
+})
+
+test('in Mosaic Manager un PNG oltre i 4 MiB lo legge base64 e diventa pixel; oltre 32 MiB resta la nota', { options: { anteprime: 'immagini' } }, async ($, on) => {
   const clock = mock.clock(on)
   const cartella = '/tmp/claude-501/-work/sess-1/images'
   const o = ospite(on, {
-    env: {},
+    env: { TERM_PROGRAM: 'MosaicManager', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' },
+    root: '/work',
+    file: { [`${cartella}/1.png`]: ROSSO_SU_BLU, [`${cartella}/2.png`]: ROSSO_SU_BLU },
+    dimensioni: { [`${cartella}/1.png`]: 5_000_000, [`${cartella}/2.png`]: 40_000_000 },
+    bozza: '[Image #1] [Image #2]',
+  })
+  const lanciati: string[][] = []
+  on('process.spawn', async function* ($, e) {
+    lanciati.push([...e.argv])
+    yield { stream: 'stdout' as const, text: `${ROSSO_SU_BLU.slice(0, 76)}\n` }
+    yield { stream: 'stdout' as const, text: `${ROSSO_SU_BLU.slice(76)}\n` }
+    return { value: { code: 0, signal: null } }
+  })
+
+  await (await $.ui.mount({ ...SUGGERIMENTO, surface: 'terminal' })).unmount()
+  await clock.advance(100)
+
+  const ui = await $.ui.mount({ ...BANDA, surface: 'terminal' })
+  const immagine = await ui.find({ type: 'Image' })
+  expect(immagine?.props).toMatchObject({ source: { width: 40, height: 20 } })
+  const { rgba } = immagine?.props.source as { rgba: string }
+  expect([...fromBase64(rgba).subarray(0, 4)]).toEqual(ROSSO)
+  expect(await ui.find({ type: 'Text', text: 'oltre 32 MiB' })).toBeDefined()
+  expect(lanciati).toEqual([['base64', `${cartella}/1.png`]])
+  expect(o.chiamate['fs.read'] ?? 0).toBe(0)
+})
+
+test('su Windows il percorso va a PowerShell per variabile, e se il processo fallisce o non finisce resta la nota', { options: { anteprime: 'immagini' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const cartella = 'C:/Temp/claude/C--work/sess-1/images'
+  ospite(on, {
+    env: { OS: 'Windows_NT', TEMP: 'C:\\Temp', TERM_PROGRAM: 'MosaicManager' },
+    root: 'C:\\work',
+    file: { [`${cartella}/1.png`]: ROSSO_SU_BLU, [`${cartella}/2.png`]: ROSSO_SU_BLU },
+    dimensioni: { [`${cartella}/1.png`]: 5_000_000, [`${cartella}/2.png`]: 5_000_000 },
+    bozza: '[Image #1] [Image #2]',
+  })
+  const lanciati: { argv: string[]; env?: Record<string, string> }[] = []
+  on('process.spawn', async function* ($, e) {
+    lanciati.push({ argv: [...e.argv], env: e.env })
+    if (lanciati.length === 2) await new Promise(() => {})
+    yield { stream: 'stderr' as const, text: 'Exception calling "ReadAllBytes"' }
+    return { value: { code: 1, signal: null } }
+  })
+
+  await (await $.ui.mount({ ...SUGGERIMENTO, surface: 'terminal' })).unmount()
+  await clock.advance(100)
+  await clock.advance(11_000)
+
+  const ui = await $.ui.mount({ ...BANDA, surface: 'terminal' })
+  expect(await ui.find({ type: 'Image' })).toBeUndefined()
+  expect((await ui.findAll({ type: 'Text', text: 'oltre 4 MiB' })).length).toBe(2)
+  expect(lanciati[0]?.argv[0]).toBe('powershell.exe')
+  expect(lanciati[0]?.argv.join(' ')).not.toContain('1.png')
+  expect(lanciati[0]?.env).toEqual({ INFOBAR_PNG: 'C:\\Temp\\claude\\C--work\\sess-1\\images\\1.png' })
+})
+
+test('una miniatura finita mentre si legge un altro incolla non torna a "…"', { options: { anteprime: 'immagini' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const cartella = '/tmp/claude-501/-work/sess-1/images'
+  const o = ospite(on, {
+    env: { TERM_PROGRAM: 'MosaicManager' },
+    root: '/work',
+    file: { [`${cartella}/1.png`]: ROSSO_SU_BLU, [`${cartella}/2.png`]: ROSSO_SU_BLU },
+    dimensioni: { [`${cartella}/1.png`]: 5_000_000 },
+    bozza: '[Image #1]',
+  })
+  let liberaProcesso = () => {}
+  const processo = new Promise<void>(resolve => (liberaProcesso = resolve))
+  let liberaLettura = () => {}
+  o.lettura = new Promise<void>(resolve => (liberaLettura = resolve))
+  on('process.spawn', async function* () {
+    await processo
+    yield { stream: 'stdout' as const, text: ROSSO_SU_BLU }
+    return { value: { code: 0, signal: null } }
+  })
+
+  await (await $.ui.mount({ ...SUGGERIMENTO, surface: 'terminal' })).unmount()
+  await clock.advance(100)
+  o.bozza = '[Image #1] [Image #2]'
+  await (await $.ui.mount({ ...SUGGERIMENTO, surface: 'terminal' })).unmount()
+  await clock.advance(1)
+  liberaProcesso()
+  await clock.advance(100)
+  liberaLettura()
+  await clock.advance(100)
+
+  const ui = await $.ui.mount({ ...BANDA, surface: 'terminal' })
+  expect(await ui.findAll({ type: 'Image' })).toHaveLength(2)
+})
+
+test('il WebP ha la sua etichetta; oltre i 4 MiB un PNG lo legge kitty locale, un JPEG no', { options: { anteprime: 'immagini' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const cartella = '/tmp/claude-501/-work/sess-1/images'
+  const o = ospite(on, {
+    env: { KITTY_WINDOW_ID: '1' },
     root: '/work',
     file: { [`${cartella}/1.webp`]: WEBP, [`${cartella}/2.png`]: ROSSO_SU_BLU, [`${cartella}/3.jpeg`]: JPEG_BASELINE },
     dimensioni: { [`${cartella}/2.png`]: 5_000_000, [`${cartella}/3.jpeg`]: 5_000_000 },

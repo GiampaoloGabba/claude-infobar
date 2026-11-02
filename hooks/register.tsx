@@ -21,6 +21,7 @@ import { alterna, registraPannelli } from './pannelli'
 import { PANNELLO_MESSAGGI, apriMessaggi, messaggioInviato, nuovaSessioneMessaggi, quantiMessaggi, registraMessaggi } from './messaggi'
 import { PANNELLO_MODIFICHE, apriModifiche, disegnaModifiche, fileModificati, forseModificati } from './modifiche'
 import { cartellaSessione } from './sessione'
+import { MAX_LETTURA_PROCESSO, leggiConProcesso, letturaPngGrande } from './file'
 import { aggiornaCodex, codexDaMostrare } from './codex-uso'
 import { registraCopia, rispostaFinita } from './copia'
 import { EXTENSIONS, type Format, decodeImage, formatOf, imageSize } from './formati'
@@ -244,7 +245,8 @@ let inAttesa: { bozza: string; ritenta: boolean } | undefined
 let sincronizzando = false
 // Per `<cartella>/<n>`, così ogni immagine si cerca, si legge e si decodifica una volta sola.
 const descritte = new Map<string, Omit<ImmagineIncollata, 'n'>>()
-const daDecodificare = new Map<string, { n: number; bytes: Uint8Array; formato: Format }>()
+// Senza bytes, un PNG oltre i 4 MiB che si legge con un processo figlio quando tocca a lui.
+const daDecodificare = new Map<string, { n: number; bytes?: Uint8Array; formato: Format; path: string }>()
 let decodificando = false
 
 async function terminaleConImmagini($: EngineInterface): Promise<boolean> {
@@ -255,6 +257,17 @@ async function terminaleConImmagini($: EngineInterface): Promise<boolean> {
   if (programma === 'ghostty' || programma === 'kitty' || programma === 'WezTerm') return true
   const term = (await $.env.get('TERM')) ?? ''
   return term.includes('kitty') || term.includes('ghostty')
+}
+
+async function comeLeggereIlPngGrande($: EngineInterface, dimensione: number) {
+  return letturaPngGrande(dimensione, {
+    KITTY_WINDOW_ID: await $.env.get('KITTY_WINDOW_ID'),
+    GHOSTTY_RESOURCES_DIR: await $.env.get('GHOSTTY_RESOURCES_DIR'),
+    TERM_PROGRAM: await $.env.get('TERM_PROGRAM'),
+    SSH_CONNECTION: await $.env.get('SSH_CONNECTION'),
+    SSH_CLIENT: await $.env.get('SSH_CLIENT'),
+    SSH_TTY: await $.env.get('SSH_TTY'),
+  })
 }
 
 async function cartellaImmagini($: EngineInterface): Promise<string | undefined> {
@@ -287,7 +300,12 @@ async function descrivi($: EngineInterface, cartella: string | undefined, n: num
     immagine = { path, size: null }
   } else if (voce.size > MAX_LETTURA) {
     const png = EXTENSIONS[voce.name.split('.').pop()!.toLowerCase()] === 'png'
-    immagine = { path, size: null, anteprima: png && modo === 'immagini' ? { tipo: 'file' } : { tipo: 'nota', testo: 'oltre 4 MiB' } }
+    const lettura = png && modo === 'immagini' ? await comeLeggereIlPngGrande($, voce.size) : null
+    if (lettura === 'percorso') immagine = { path, size: null, anteprima: { tipo: 'file' } }
+    else if (lettura === 'processo') {
+      immagine = { path, size: null }
+      daDecodificare.set(chiave, { n, formato: 'png', path })
+    } else immagine = { path, size: null, anteprima: { tipo: 'nota', testo: `oltre ${lettura ? MAX_LETTURA_PROCESSO / 1048576 : 4} MiB` } }
   } else {
     const bytes = await $.fs.read(path, { as: 'bytes' }).then(
       r => fromBase64(r.base64),
@@ -301,7 +319,7 @@ async function descrivi($: EngineInterface, cartella: string | undefined, n: num
       immagine = { path, size, anteprima: { tipo: 'nota', testo: 'WebP: niente anteprima' } }
     } else {
       immagine = { path, size }
-      daDecodificare.set(chiave, { n, bytes, formato })
+      daDecodificare.set(chiave, { n, bytes, formato, path })
     }
   }
   descritte.set(chiave, immagine)
@@ -314,22 +332,27 @@ function decodificaInSeguito($: EngineInterface) {
   decodificando = true
   $.clock.after(RESPIRO_MS, async () => {
     try {
-      const [chiave, { n, bytes, formato }] = daDecodificare.entries().next().value!
+      const [chiave, { n, bytes: giaLetti, formato, path }] = daDecodificare.entries().next().value!
       daDecodificare.delete(chiave)
       const lato = (await anteprima) === 'immagini' ? MINIATURA_IMMAGINI : MINIATURA_BLOCCHI
+      const bytes = giaLetti ?? (await leggiConProcesso($, path))
+      let size = descritte.get(chiave)?.size ?? null
       let fatta: NonNullable<ImmagineIncollata['anteprima']>
-      try {
-        const miniatura = decodeImage(bytes, formato, lato.width, lato.height)
-        fatta = { tipo: 'pixel', width: miniatura.width, height: miniatura.height, rgba: toBase64(miniatura.rgba) }
-      } catch {
-        // PNG interlacciato, JPEG aritmetico o file danneggiato: il riquadro mostra il tag.
-        fatta = { tipo: 'nota', testo: `[Image #${n}]` }
-      }
+      if (!bytes) fatta = { tipo: 'nota', testo: 'oltre 4 MiB' }
+      else
+        try {
+          size ??= imageSize(bytes, formato)
+          const miniatura = decodeImage(bytes, formato, lato.width, lato.height)
+          fatta = { tipo: 'pixel', width: miniatura.width, height: miniatura.height, rgba: toBase64(miniatura.rgba) }
+        } catch {
+          // PNG interlacciato, JPEG aritmetico o file danneggiato: il riquadro mostra il tag.
+          fatta = { tipo: 'nota', testo: `[Image #${n}]` }
+        }
       const vista = descritte.get(chiave)
       if (!vista) return
-      descritte.set(chiave, { ...vista, anteprima: fatta })
+      descritte.set(chiave, { ...vista, size, anteprima: fatta })
       await update($, immagini, lista =>
-        lista.some(i => i.path === vista.path) ? lista.map(i => (i.path === vista.path ? { ...i, anteprima: fatta } : i)) : lista,
+        lista.some(i => i.path === vista.path) ? lista.map(i => (i.path === vista.path ? { ...i, size, anteprima: fatta } : i)) : lista,
       )
     } finally {
       decodificando = false
@@ -350,7 +373,8 @@ async function mostra($: EngineInterface, bozza: string, ritenta: boolean) {
   const file = daCercare ? await fileImmagini($, cartella) : new Map<number, FsEntry>()
   const lista: ImmagineIncollata[] = []
   for (const n of numeri) lista.push(await descrivi($, cartella, n, file))
-  await update($, immagini, () => lista)
+  // Una decodifica finita durante le letture qui sopra ha già pubblicato la sua miniatura: la copia in `lista` è vecchia.
+  await update($, immagini, () => lista.map(i => ({ ...i, ...descritte.get(`${cartella}/${i.n}`) })))
   decodificaInSeguito($)
 
   if (lista.every(immagine => immagine.path !== null)) {
