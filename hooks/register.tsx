@@ -16,6 +16,7 @@ import {
 } from './account'
 import { apri } from './apri'
 import { PANNELLO_LAVORI, apriLavori, attivitaInCorso, disegnaLavori, lavoriDaAgenti, lavoriDaRiepilogo, lavoriInCorso, lavoroDaNotifica, lavoroFermato } from './lavori'
+import { PANNELLO_MODIFICHE, apriModifiche, disegnaModifiche, fileModificati, forseModificati } from './modifiche'
 import { cartellaSessione } from './sessione'
 import { aggiornaCodex, codexDaMostrare } from './codex-uso'
 import { registraCopia, rispostaFinita } from './copia'
@@ -411,6 +412,7 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'autorizza', description: 'Aggiunge un\'autorizzazione di sessione (alias: db, prod, deploy, commit, push)', argumentHint: '[testo|alias]' })
     await $.command.register({ name: 'revoca', description: 'Revoca un\'autorizzazione di sessione', argumentHint: '<n|tutte>' })
     await $.command.register({ name: 'autonomo', description: 'Attiva o disattiva la modalità autonoma di sessione' })
+    await $.command.register({ name: 'modifiche', description: 'Apre il pannello dei file modificati e non committati nel repository git, con diff', immediate: true })
     await $.command.register({ name: 'lavori', description: 'Apre il pannello dei lavori in background: comandi, subagent, workflow, con output e stop', immediate: true })
     await $.command.register({ name: 'ripresa', description: 'Stato della ripresa automatica dopo un limite', argumentHint: '[annulla]', immediate: true })
     // Dove la sessione ha un login suo (app desktop) la barra non c'è e cswap non la riguarda: niente timer.
@@ -433,6 +435,7 @@ export const register: Register = (on, options) => {
     fileHead = await trovaHead($)
     await aggiornaTutto($)
     await armaRipresa($)
+    forseModificati($)
     if (conAnteprime) {
       if (scelta !== 'immagini' && scelta !== 'blocchi' && scelta !== 'etichette') fissaAnteprima((await terminaleConImmagini($)) ? 'immagini' : 'blocchi')
       sincronizza($, (await $.prompt.read()).text)
@@ -495,6 +498,7 @@ export const register: Register = (on, options) => {
     if (conAnteprime) sincronizza($, '')
     if (e.origin.kind === 'task-notification') await lavoroDaNotifica($, e.text)
     const daPersona = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
+    if (daPersona) forseModificati($)
     if (daPersona) {
       if (await read($, ripresa)) await annullaRipresa($)
       await aggiornaBranch($)
@@ -558,6 +562,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     const esito = await next(e)
+    forseModificati($, e.tool)
     if (!e.agentId) {
       const uso = await $.session.usage()
       await aggiornaContesto($, uso.context)
@@ -641,6 +646,15 @@ export const register: Register = (on, options) => {
     }),
   )
 
+  on('ui.render', { component: 'Pane', requestId: PANNELLO_MODIFICHE }, async ($, e) =>
+    disegnaModifiche($, e, typeof options.editor === 'string' ? options.editor : undefined),
+  )
+
+  on('command.run', { command: 'modifiche' }, async $ => {
+    await apriModifiche($)
+    return { text: 'Pannello dei file modificati aperto.' }
+  })
+
   on('command.run', { command: 'lavori' }, async $ => {
     await apriLavori($)
     return { text: 'Pannello dei lavori aperto.' }
@@ -661,6 +675,7 @@ export const register: Register = (on, options) => {
     const p = await read($, percent)
     const t = await read($, tokens)
     const occupati = await lavoriInCorso($)
+    const modificati = await fileModificati($)
     const turno = await read($, turnoAttivo)
     const r = await read($, ripresa)
     const lista = await read($, autorizzazioni)
@@ -687,6 +702,11 @@ export const register: Register = (on, options) => {
           {dir ? <Text dimColor>{' | '}</Text> : null}
           {dir ? <Text bold color="yellow">{dir}</Text> : null}
           {ramo ? <Text color="cyan">{` (${ramo})`}</Text> : null}
+          {modificati ? (
+            <Button key="modifiche" plain onPress={() => void apriModifiche($)}>
+              <Text color="yellow">{` ✎ ${modificati}`}</Text>
+            </Button>
+          ) : null}
         </Box>
         <Box flexDirection="row">
           <Text color={colore}>{'◐ '}</Text>

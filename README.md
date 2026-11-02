@@ -49,6 +49,7 @@ In fondo compaiono le autorizzazioni attive e, se c'è, l'orario della ripresa a
 | `/autorizza [testo]` | Aggiunge un'autorizzazione di sessione. Ci sono scorciatoie per `db`, `prod`, `deploy`, `commit` e `push`. Senza argomenti mostra l'elenco. |
 | `/revoca <n\|tutte>` | Toglie un'autorizzazione, o tutte. |
 | `/autonomo` | Accende o spegne la modalità autonoma: Claude porta a termine il lavoro concordato senza fermarsi a chiedere conferme. |
+| `/modifiche` | Apre il pannello dei file modificati e non committati nel repository git, con diff. |
 | `/lavori` | Apre il pannello dei lavori in background, con output e `ferma`. |
 | `/ripresa [annulla]` | Mostra la ripresa automatica programmata, o la annulla. |
 | `/account [alias\|numero]` | Apre il pannello degli account di cswap; con un alias o un numero fa lo switch del profilo principale. |
@@ -136,6 +137,14 @@ Un lavoro che Claude ferma da sé (TaskStop) esce subito dal conto. Uno fermato 
 Il pannello rilegge un file di output solo quando cambia. Oltre i 4 MB (il massimo che una mod può leggere) le ultime righe non si possono mostrare e il pannello lo dice: la fine si vede con `↗ apri`.
 
 La durata parte da quando la mod ha visto il lavoro: per un comando lanciato in background è la partenza; per un workflow o un Monitor, che compaiono solo nel riepilogo di fine turno, può essere un po' dopo.
+
+## File modificati
+
+Se la sessione lavora dentro un repository git, nella prima riga della barra, dopo il branch, compare `✎ 4` in giallo: i file con modifiche non committate (`mio-progetto (main) ✎ 4`). Un clic, o `/modifiche`, apre il pannello: un file per riga con `+` se è nuovo, `~` se è modificato, `−` se è eliminato, `→` se è rinominato (con il nome di prima) e `!` se è in conflitto, il percorso dalla radice del repository e le righe aggiunte e tolte rispetto all'ultimo commit; in cima il totale.
+
+`▾ diff` mostra il diff del file dentro il pannello, colorato come quelli di Claude Code (le prime 300 righe); `↗ Rider` o `↗ VS Code` (l'editor dell'opzione `editor`) lo apre sulla prima riga cambiata.
+
+L'elenco viene da `git status` e `git diff --numstat`, quindi comprende tutto quello che non è committato: le modifiche di Claude, quelle dei comandi che ha lanciato (formatter, script) e le tue. Si rilegge dopo ogni tool di Claude che può scrivere file, quando invii un prompt e ogni 5 secondi a pannello aperto; git gira senza lock opzionali, così non intralcia un commit in corso. I file in `.gitignore` non ci sono, perché git status non li mostra. Non ci sono nemmeno i repository annidati, come i worktree che Claude Code crea per i subagent isolati (`.claude/worktrees/agent-…`): git li elenca come una cartella sola, senza guardarci dentro, e non sono modifiche da committare. Fuori da un repository `✎` non compare e il pannello lo dice.
 
 ## Codex
 

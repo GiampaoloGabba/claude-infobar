@@ -1,5 +1,20 @@
 export type Attivita = { tipo: string; descrizione: string }
 
+/** Un file con modifiche non committate nel repository git della sessione. */
+export type FileGit = {
+  /** Relativo alla radice del repository, con le barre in avanti. */
+  path: string
+  stato: 'nuovo' | 'modificato' | 'eliminato' | 'rinominato' | 'conflitto'
+  /** Righe aggiunte e tolte rispetto all'ultimo commit; null per un file binario o dove git non lo dice. */
+  aggiunte: number | null
+  tolte: number | null
+  /** Il nome di prima, per un file rinominato. */
+  da?: string
+}
+
+/** Le modifiche non committate: null fuori da un repository git. */
+export type StatoGit = { radice: string; file: FileGit[]; aggiornatoAlle: number } | null
+
 /** Un lavoro in background della sessione: comando, subagent, workflow, Monitor. */
 export type Lavoro = {
   id: string
@@ -69,6 +84,10 @@ declare module 'claude-code' {
       risposteFinite: string[]
       /** Per chiamata di Bash o PowerShell (il tool_use_id): i documenti scritti e gli URL dell'output. */
       trovatiComandi: StateFamily<{ prodotti: string[]; url: string[] }>
+      statoGit: StatoGit
+      /** I file di cui il pannello mostra il diff, e il diff già letto da git: il disegno non lancia comandi. */
+      diffAperti: string[]
+      testiDiff: Record<string, string>
       modello: string | null
       effort: string | null
       cartella: string | null
