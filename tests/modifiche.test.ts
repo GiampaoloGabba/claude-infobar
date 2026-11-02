@@ -2,6 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { diffNuovo, eAnnidato, fileDaStatus, primaRigaDelDiff, righeDaNumstat, soloBlocchi } from '../hooks/git'
+import { filtraFile } from '../hooks/modifiche'
 
 const Z = String.fromCharCode(0)
 const T = String.fromCharCode(9)
@@ -129,4 +130,27 @@ test('fuori da un repository la barra non mostra niente e il pannello lo dice', 
   await $.command.run({ command: 'modifiche', args: '' } as never)
   const ui = await $.ui.mount(PANNELLO)
   expect(await ui.find({ type: 'Text', text: 'La cartella della sessione non è in un repository git.' })).toBeDefined()
+})
+
+test('la ricerca tra i file vuole tutte le parole nel percorso, anche in quello di prima di una rinomina', () => {
+  const file = [
+    { path: 'hooks/messaggi.tsx', stato: 'modificato', aggiunte: 1, tolte: 0 },
+    { path: 'tests/messaggi.test.ts', stato: 'nuovo', aggiunte: 9, tolte: 0 },
+    { path: 'hooks/barra.ts', stato: 'rinominato', aggiunte: 0, tolte: 0, da: 'hooks/vecchia.ts' },
+  ] as const
+  expect(filtraFile(file, 'MESSAGGI').map(f => f.path)).toEqual(['hooks/messaggi.tsx', 'tests/messaggi.test.ts'])
+  expect(filtraFile(file, 'hooks messaggi').map(f => f.path)).toEqual(['hooks/messaggi.tsx'])
+  expect(filtraFile(file, 'vecchia').map(f => f.path)).toEqual(['hooks/barra.ts'])
+  expect(filtraFile(file, '')).toHaveLength(3)
+})
+
+test('con pochi file il pannello non ha il campo di ricerca', async ($, on) => {
+  const clock = mock.clock(on)
+  ospite(on)
+  await $.tool.call({ tool: 'Edit', file_path: 'E:/work/src/a.ts', old_string: 'due', new_string: 'DUE' } as never)
+  await clock.advance(1000)
+  await $.command.run({ command: 'modifiche', args: '' } as never)
+  const ui = await $.ui.mount(PANNELLO)
+  expect(await ui.find({ type: 'Text', text: 'FILE MODIFICATI · 4' })).toBeDefined()
+  expect(await ui.find({ type: 'Input' })).toBeUndefined()
 })

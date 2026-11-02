@@ -95,6 +95,8 @@ declare module 'claude-code' {
       filtroMessaggi: string
       /** La sessione a cui appartiene l'elenco dei messaggi. */
       sessioneMessaggi: string | null
+      /** Cresce a ogni Invio o azzeramento: ridisegna il campo di ricerca con il filtro dentro. */
+      versioneCampoMessaggi: number
       /** Per riga del transcript: il messaggio a cui il pannello ti ha appena portato, acceso per un attimo. */
       messaggioEvidenziato: StateFamily<boolean>
       /** Per lettura di immagine (il tool_use_id): la miniatura a blocchi decodificata, 'errore' dove non si è potuto. */
@@ -103,6 +105,10 @@ declare module 'claude-code' {
       /** I file di cui il pannello mostra il diff, e il diff già letto da git: il disegno non lancia comandi. */
       diffAperti: string[]
       testiDiff: Record<string, string>
+      /** Il testo cercato nel pannello dei file modificati. */
+      filtroModifiche: string
+      /** Cresce a ogni Invio o azzeramento: ridisegna il campo di ricerca con il filtro dentro. */
+      versioneCampoModifiche: number
       modello: string | null
       effort: string | null
       cartella: string | null

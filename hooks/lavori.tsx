@@ -6,6 +6,7 @@ import { apriTesto } from './apri'
 import { apriInEditor, comandoOutput, editorPer } from './editor'
 import { MAX_LETTURA, leggiSeCambiato } from './file'
 import { fileOutputLavoro, fileOutputNelTesto, ricordaFileOutput } from './sessione'
+import { segnaAperto } from './pannelli'
 import { formattaDurata } from './testi'
 
 export const PANNELLO_LAVORI = 'lavori'
@@ -218,7 +219,8 @@ async function mostraOutput($: EngineInterface, id: string) {
 }
 
 export async function apriLavori($: EngineInterface) {
-  await $.ui.open({ id: PANNELLO_LAVORI, title: 'Lavori in background' })
+  const aperto = await $.ui.open({ id: PANNELLO_LAVORI, title: 'Lavori in background' })
+  if (aperto.isPlaced) segnaAperto(PANNELLO_LAVORI)
   await aggiorna($, true)
   timer ??= $.clock.every(AGGIORNA_MS, () => void aggiorna($))
 }

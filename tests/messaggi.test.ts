@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { filtra, primaRiga, unisci } from '../hooks/messaggi'
+import { estratto, filtra, primaRiga, unisci } from '../hooks/messaggi'
 
 const m = (id: string, testo: string, ora: number | null = null) => ({ id, testo, ora, risposta: null })
 
@@ -79,4 +79,54 @@ test('copia risposta copia l\'ultimo blocco di testo che segue il messaggio', as
   await ui.press({ key: 'copia-risp-u1' })
   await ui.press({ key: 'copia-msg-u2' })
   expect(copiati).toEqual(['Ecco la risposta.', 'altra domanda'])
+})
+
+test('cercando, la riga mostra il pezzo intorno alla parola trovata, segnata', () => {
+  const testo = 'ciao, devo scrivere un po di storia del progetto e poi controllare il rewind della sessione'
+  const lontano = estratto(testo, 'Rewind', 30)
+  const riga = lontano.map(p => p.testo).join('')
+  expect(riga.startsWith('…')).toBe(true)
+  expect(riga.length).toBeLessThanOrEqual(30)
+  expect(lontano.filter(p => p.trovato)).toEqual([{ testo: 'rewind', trovato: true }])
+
+  expect(estratto(testo, 'devo', 30)).toEqual([{ testo: 'ciao, ' }, { testo: 'devo', trovato: true }, { testo: ' scrivere un po di …' }])
+  expect(estratto('prima riga\nseconda', '', 30)).toEqual([{ testo: 'prima riga' }])
+})
+
+test('dopo Invio la parola cercata resta nel campo e la lista filtrata, e azzera riporta tutto', async ($, on) => {
+  const clock = mock.clock(on)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['riga del motore'] }))
+  for (const r of [riga('u1', 'primo'), riga('u2', 'secondo')]) await (await $.ui.mount(r)).unmount()
+  await clock.advance(100)
+
+  const ui = (await $.ui.mount(PANNELLO)) as Awaited<ReturnType<typeof $.ui.mount>> & {
+    input: (target: { key: string; text: string; kind?: 'change' | 'submit' }) => Promise<unknown>
+  }
+  const voci = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key).filter(k => k?.startsWith('msg-'))
+  await ui.input({ key: 'cerca-0', text: 'secondo', kind: 'change' })
+  await ui.input({ key: 'cerca-0', text: 'secondo' })
+  expect(await voci()).toEqual(['msg-u2'])
+  expect(await ui.find({ type: 'Text', text: 'MESSAGGI · 1 di 2' })).toBeDefined()
+  expect((await ui.find({ type: 'Input', key: 'cerca-1' }))?.props).toMatchObject({ value: 'secondo' })
+
+  await ui.press({ key: 'azzera' })
+  expect(await voci()).toEqual(['msg-u2', 'msg-u1'])
+})
+
+test('il pulsante della barra apre il pannello, e un secondo clic lo chiude se è quello mostrato', async ($, on) => {
+  mock.clock(on)
+  const chiamate: string[] = []
+  let mostrato = true
+  on('ui.render', () => ({ type: 'Text', props: {}, children: [''] }))
+  on('ui.open', ($, e) => (chiamate.push(`open ${e.id}`), { value: { isPlaced: true } }))
+  on('ui.panes', () => ({ value: [{ id: 'messaggi', title: 'Messaggi', isShown: mostrato, isFocused: false, isPlaced: true }] }))
+  on('ui.close', ($, e) => (chiamate.push(`close ${e.id}`), { value: undefined }))
+  on('ui.focus', () => ({}))
+
+  const banda = await $.ui.mount({ plugin: 'infobar', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, bodyColumns: 120 } as never })
+  await banda.press({ key: 'messaggi' })
+  await banda.press({ key: 'messaggi' })
+  mostrato = false
+  await banda.press({ key: 'messaggi' })
+  expect(chiamate).toEqual(['open messaggi', 'close messaggi', 'open messaggi'])
 })

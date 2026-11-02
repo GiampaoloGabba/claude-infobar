@@ -3,6 +3,7 @@ import type { EngineInterface, RenderInput } from 'claude-code'
 
 import type { Conto, ContoSessione, FinestraConto, StatoConti } from '../types'
 import { STATO_CONTO, aliasDaSequenza, contiDaCswap, emailDaConfig, profiloFisso } from './conti'
+import { alterna, segnaAperto } from './pannelli'
 import { accorcia, barra, coloreLivello } from './testi'
 
 export const PANNELLO_CONTI = 'account'
@@ -134,7 +135,8 @@ export async function aggiornaContiSeVecchi($: EngineInterface) {
 }
 
 export async function apriConti($: EngineInterface) {
-  await $.ui.open({ id: PANNELLO_CONTI, title: 'Account' })
+  const aperto = await $.ui.open({ id: PANNELLO_CONTI, title: 'Account' })
+  if (aperto.isPlaced) segnaAperto(PANNELLO_CONTI)
   void aggiornaContiSeVecchi($)
 }
 
@@ -215,7 +217,7 @@ export async function disegnaConti($: EngineInterface, e: RenderInput<'Pane'>) {
           <Text dimColor={!s.occupato} color={s.occupato ? 'yellow' : undefined}>
             {testoAggiornamento(s)}
           </Text>
-          <Button key="aggiorna-conti" hotkey="r" plain onPress={() => void aggiornaConti($)}>
+          <Button key="aggiorna-conti" plain onPress={() => void aggiornaConti($)}>
             <Text color="cyan">↻ aggiorna</Text>
           </Button>
         </Box>
@@ -249,7 +251,7 @@ export async function pulsanteConto($: EngineInterface, e: RenderInput) {
   if (!sessione) return null
   const { Text, Button } = $.ui.resolve(e)
   return (
-    <Button key="conto" plain onPress={() => void apriConti($)}>
+    <Button key="conto" plain onPress={() => void alterna($, PANNELLO_CONTI, () => apriConti($))}>
       <Text bold color={sessione.fisso ? 'magenta' : 'green'}>{nomeConto(sessione.nome)}</Text>
       <Text dimColor>{sessione.fisso ? ' ⚑' : ' ▾'}</Text>
     </Button>

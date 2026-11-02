@@ -2,12 +2,15 @@ import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, On, RenderInput, UiPressArgument } from 'claude-code'
 
 import type { MessaggioUtente } from '../types'
+import { segnaAperto } from './pannelli'
+import { type Pezzo, segna } from './testi'
 
 export const PANNELLO_MESSAGGI = 'messaggi'
 
 const messaggi = atom({ plugin: 'infobar', key: 'messaggi' } as const, [] as MessaggioUtente[])
 const filtroMessaggi = atom({ plugin: 'infobar', key: 'filtroMessaggi' } as const, '')
 const sessioneMessaggi = atom({ plugin: 'infobar', key: 'sessioneMessaggi' } as const, null as string | null)
+const versioneCampo = atom({ plugin: 'infobar', key: 'versioneCampoMessaggi' } as const, 0)
 const evidenziato = atom({ plugin: 'infobar', key: 'messaggioEvidenziato' } as const, false)
 
 const MAX_MESSAGGI = 1000
@@ -135,10 +138,30 @@ export async function quantiMessaggi($: EngineInterface): Promise<number> {
   return (await read($, messaggi)).length
 }
 
-export async function apriMessaggi($: EngineInterface) {
-  await $.ui.open({ id: PANNELLO_MESSAGGI, title: 'Messaggi', focus: true })
+async function azzera($: EngineInterface) {
+  await update($, filtroMessaggi, () => '')
+  await update($, versioneCampo, v => v + 1)
+  // Dopo l'azzeramento si riparte a cercare: la tastiera torna nel campo, ridisegnato con la chiave nuova.
+  const campo = await read($, versioneCampo)
+  await $.ui.focus({ requestId: PANNELLO_MESSAGGI, key: `cerca-${campo}` }).catch(() => undefined)
 }
 
+export async function apriMessaggi($: EngineInterface) {
+  // Prima di tutto l'apertura: solo una chiamata fatta subito dopo il clic o il comando conta come tua, e un
+  // pannello aperto da solo in un terminale sotto le 144 colonne resta in attesa invece di comparire.
+  const aperto = await $.ui.open({ id: PANNELLO_MESSAGGI, title: 'Messaggi', focus: true })
+  if (!aperto.isPlaced) {
+    $.ui.toast(`Il pannello dei messaggi non si apre: ${aperto.reason}`)
+    return
+  }
+  segnaAperto(PANNELLO_MESSAGGI)
+  // A ogni apertura il campo riparte con la tastiera: autoFocus vale solo per la sua prima versione.
+  await update($, versioneCampo, () => 0)
+  // Aperto da un clic sulla barra, il pannello non prende la tastiera da sé (ce l'ha la barra): la si chiede.
+  await $.ui.focus({ requestId: PANNELLO_MESSAGGI, key: 'cerca-0' }).catch(() => undefined)
+}
+
+const AZZERA = '✕ azzera'
 const AZIONE_TESTO = '⧉ testo'
 const AZIONE_RISPOSTA = '⧉ risposta'
 
@@ -151,9 +174,32 @@ function taglia(testo: string, max: number) {
   return testo.length <= max ? testo : `${testo.slice(0, Math.max(1, max - 1))}…`
 }
 
+
+/**
+ * Cosa mostrare di un messaggio in `max` caratteri: senza ricerca la prima riga; cercando, il pezzo intorno
+ * alla prima parola trovata, che inizia poco prima di lei, con le parole cercate segnate.
+ */
+export function estratto(testo: string, filtro: string, max: number): Pezzo[] {
+  const parole = filtro.toLowerCase().split(/\s+/).filter(p => p && !/^#\d+$/.test(p))
+  const piatto = testo.replace(/\s+/g, ' ').trim()
+  const basso = piatto.toLowerCase()
+  const primo = parole.map(p => basso.indexOf(p)).filter(i => i >= 0).sort((a, b) => a - b)[0]
+  let riga: string
+  if (primo === undefined) riga = taglia(primaRiga(testo), max)
+  else if (primo + (parole.find(p => basso.startsWith(p, primo))?.length ?? 0) <= max - 1) riga = taglia(piatto, max)
+  else {
+    // Un po' di contesto prima della parola: abbastanza da capire la frase, senza spingerla in fondo.
+    const inizio = Math.max(0, primo - Math.floor(max / 4))
+    const resto = piatto.slice(inizio)
+    riga = `…${resto.length > max - 1 ? `${resto.slice(0, max - 2)}…` : resto}`
+  }
+  return segna(riga, parole)
+}
+
 export async function disegnaMessaggi($: EngineInterface, e: RenderInput<'Pane'>) {
   const lista = await read($, messaggi)
   const filtro = await read($, filtroMessaggi)
+  const campo = await read($, versioneCampo)
   const larghezza = Math.max(30, e.props.bodyColumns - 2)
   const elementi = $.ui.resolve(e)
   if (!('Input' in elementi)) return <elementi.Text dimColor>Il pannello dei messaggi c'è solo nel terminale.</elementi.Text>
@@ -164,18 +210,35 @@ export async function disegnaMessaggi($: EngineInterface, e: RenderInput<'Pane'>
 
   return (
     <Box flexDirection="column">
+      {/* Prima del campo non compare né sparisce niente mentre scrivi: un elemento in più lì sposta il fuoco
+          fuori dal campo, e le lettere successive finiscono nel prompt. */}
       <Box marginTop={1}>
-        <Text bold color="yellow">{`MESSAGGI · ${lista.length}`}</Text>
+        <Text bold color="yellow">{filtro.trim() ? `MESSAGGI · ${trovati.length} di ${lista.length}` : `MESSAGGI · ${lista.length}`}</Text>
       </Box>
+      {/* Invio svuota il campo da sé: a ogni Invio il campo si ridisegna con una chiave nuova, che lo riparte
+          dal filtro, così la parola cercata resta scritta lì. */}
       <Input
-        key="cerca"
+        key={`cerca-${campo}`}
         placeholder="cerca nei tuoi messaggi (#12 per numero)"
         value={filtro}
-        autoFocus
+        autoFocus={campo === 0 ? true : undefined}
         onInput={(valore: string) => void update($, filtroMessaggi, () => valore)}
-        onSubmit={() => (trovati[0] ? vaiA($, trovati[0].m) : undefined)}
+        // Invio porta la tastiera sui risultati, come una palette: frecce per scegliere, Invio per saltare.
+        onSubmit={async (valore: string) => {
+          if (valore.trim()) await update($, filtroMessaggi, () => valore)
+          await update($, versioneCampo, v => v + 1)
+          const primo = trovati[0]
+          if (primo) await $.ui.focus({ requestId: PANNELLO_MESSAGGI, key: `msg-${primo.m.id}` }).catch(() => undefined)
+        }}
       />
-      <Text dimColor>{'─'.repeat(larghezza)}</Text>
+      <Box flexDirection="row">
+        <Text dimColor>{'─'.repeat(Math.max(1, larghezza - (filtro.trim() ? AZZERA.length + 1 : 0)))}</Text>
+        {filtro.trim() ? (
+          <Button key="azzera" plain onPress={() => azzera($)}>
+            <Text color="cyan">{` ${AZZERA}`}</Text>
+          </Button>
+        ) : null}
+      </Box>
       {!lista.length ? (
         <Text dimColor>Nessun messaggio ancora: compaiono man mano che il transcript li mostra.</Text>
       ) : !trovati.length ? (
@@ -188,7 +251,13 @@ export async function disegnaMessaggi($: EngineInterface, e: RenderInput<'Pane'>
             <Box key={`riga-${m.id}`} flexDirection="column">
               <Button key={`msg-${m.id}`} plain onPress={() => vaiA($, m)}>
                 <Text dimColor>{prefisso}</Text>
-                {taglia(primaRiga(m.testo), larghezza - prefisso.length)}
+                {estratto(m.testo, filtro, larghezza - prefisso.length).map((pezzo, i) =>
+                  pezzo.trovato ? (
+                    <Text key={`p${i}`} color="yellow" bold>{pezzo.testo}</Text>
+                  ) : (
+                    <Text key={`p${i}`}>{pezzo.testo}</Text>
+                  ),
+                )}
               </Button>
               <Box position="absolute" top={0} right={0} flexDirection="row" display="none" hover={{ display: 'flex' }}>
                 <Text>{'  '}</Text>

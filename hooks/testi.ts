@@ -210,3 +210,25 @@ export function accorcia(nome: string, max: number): string {
   const coda = Math.floor(spazio / 3)
   return `${radice.slice(0, spazio - coda)}…${radice.slice(radice.length - coda)}${estensione}`
 }
+
+export type Pezzo = { testo: string; trovato?: true }
+
+/** Il testo diviso in pezzi, con le parole cercate (maiuscole o no) segnate come trovate. */
+export function segna(testo: string, parole: readonly string[]): Pezzo[] {
+  if (!parole.length) return [{ testo }]
+  const pezzi: Pezzo[] = []
+  const trova = new RegExp(parole.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi')
+  let ultimo = 0
+  for (const m of testo.matchAll(trova)) {
+    if (m.index > ultimo) pezzi.push({ testo: testo.slice(ultimo, m.index) })
+    pezzi.push({ testo: m[0], trovato: true })
+    ultimo = m.index + m[0].length
+  }
+  if (ultimo < testo.length) pezzi.push({ testo: testo.slice(ultimo) })
+  return pezzi
+}
+
+/** Le parole di una ricerca, minuscole; vuota se non c'è niente da cercare. */
+export function paroleRicerca(filtro: string): string[] {
+  return filtro.toLowerCase().split(/\s+/).filter(Boolean)
+}
