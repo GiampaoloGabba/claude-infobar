@@ -3,7 +3,7 @@ import type { EngineInterface, RenderInput } from 'claude-code'
 
 import type { Conto, ContoSessione, FinestraConto, StatoConti } from '../types'
 import { STATO_CONTO, aliasDaSequenza, contiDaCswap, emailDaConfig, profiloFisso } from './conti'
-import { coloreLivello } from './testi'
+import { barra, coloreLivello } from './testi'
 
 export const PANNELLO_CONTI = 'account'
 // L'endpoint dei consumi di cswap risponde 429 se interrogato spesso, e ogni sessione aperta ha questo timer.
@@ -154,54 +154,81 @@ const etichettaEvidenza = (sessione: ContoSessione | null) => (sessione?.fisso ?
 const testoAggiornamento = (s: StatoConti) =>
   s.occupato ?? (s.aggiornatiAlle ? `aggiornato alle ${oraMinuti(s.aggiornatiAlle)}` : '')
 
-export async function disegnaConti($: EngineInterface, e: RenderInput) {
+export async function disegnaConti($: EngineInterface, e: RenderInput<'Pane'>) {
   const s = await read($, conti)
   const sessione = await contoDaMostrare($)
   const { Box, Text, Button } = $.ui.resolve(e)
+  const larghezza = Math.max(30, e.props.bodyColumns - 2)
 
   const uso = (etichetta: string, f: FinestraConto | null) =>
     f ? (
       <Text>
-        <Text dimColor>{`${etichetta} `}</Text>
-        <Text color={coloreLivello(f.pct)}>{`${f.pct}%`}</Text>
-        <Text dimColor>{f.clock ? ` ↻ ${f.clock}   ` : '   '}</Text>
+        <Text dimColor>{`${etichetta}  `}</Text>
+        <Text color={coloreLivello(f.pct)}>{barra(f.pct)}</Text>
+        <Text bold color={coloreLivello(f.pct)}>{` ${String(f.pct).padStart(3)}%`}</Text>
+        <Text dimColor>{f.clock ? `  ↻ ${f.clock}` : ''}</Text>
       </Text>
     ) : null
 
-  return (
-    <Box flexDirection="column">
-      <Text dimColor>{testoQui(sessione)}</Text>
-      <Text> </Text>
-      {s.conti.length === 0 && !s.errore && <Text dimColor>Nessun dato ancora.</Text>}
-      {s.conti.map(c => (
-        <Box flexDirection="column" marginBottom={1}>
-          <Box flexDirection="row">
-            <Text bold={evidenziato(c, sessione)} color={evidenziato(c, sessione) ? 'green' : undefined} dimColor={!evidenziato(c, sessione)}>
-              {`${evidenziato(c, sessione) ? '●' : '○'} ${c.nome}`}
-            </Text>
-            <Text>{'  '}</Text>
-            {evidenziato(c, sessione) ? (
-              <Text bold color="black" backgroundColor="green">{` ${etichettaEvidenza(sessione).toUpperCase()} `}</Text>
-            ) : sessione?.fisso ? null : (
-              <Button key={`switch-${c.numero}`} label="switch" onPress={() => void passaA($, String(c.numero))} />
-            )}
-          </Box>
-          {c.stato === 'ok' ? (
-            <Text>
-              {'  '}
-              {uso('5h', c.cinqueOre)}
-              {uso('7d', c.settimana)}
-            </Text>
-          ) : (
-            <Text color="yellow">{`  ${STATO_CONTO[c.stato] ?? c.stato}`}</Text>
+  const riquadro = (c: Conto) => {
+    const qui = evidenziato(c, sessione)
+    return (
+      <Box
+        key={`conto-${c.numero}`}
+        flexDirection="column"
+        borderStyle="round"
+        borderColor={qui ? 'green' : undefined}
+        borderDimColor={!qui}
+        paddingX={1}
+      >
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text bold={qui} color={qui ? 'green' : undefined}>{`${qui ? '●' : '○'} ${c.nome}`}</Text>
+          {qui ? (
+            <Text bold color="black" backgroundColor="green">{` ${etichettaEvidenza(sessione).toUpperCase()} `}</Text>
+          ) : sessione?.fisso ? null : (
+            <Button key={`switch-${c.numero}`} plain onPress={() => void passaA($, String(c.numero))}>
+              <Text color="cyan">⇄ switch</Text>
+            </Button>
           )}
         </Box>
-      ))}
-      {s.errore && <Text color="red">{`Errore: ${s.errore}`}</Text>}
-      <Box flexDirection="row">
-        <Button key="aggiorna-conti" hotkey="r" label="aggiorna" onPress={() => void aggiornaConti($)} />
-        <Text dimColor>{`  ${testoAggiornamento(s)}`}</Text>
+        {c.stato === 'ok' ? (
+          <Box flexDirection="column">
+            {uso('5h', c.cinqueOre)}
+            {uso('7d', c.settimana)}
+          </Box>
+        ) : (
+          <Text>
+            <Text color="yellow">{'⚠ '}</Text>
+            <Text color="yellow">{STATO_CONTO[c.stato] ?? c.stato}</Text>
+          </Text>
+        )}
       </Box>
+    )
+  }
+
+  return (
+    <Box flexDirection="column">
+      {/* Una riga di distacco: senza, "aggiorna" sta subito sotto la × di chiusura del pannello. */}
+      <Box flexDirection="row" justifyContent="space-between" marginTop={1}>
+        <Text bold color="cyan">{`ACCOUNT · ${s.conti.length}`}</Text>
+        <Box flexDirection="row" columnGap={2}>
+          <Text dimColor={!s.occupato} color={s.occupato ? 'yellow' : undefined}>
+            {testoAggiornamento(s)}
+          </Text>
+          <Button key="aggiorna-conti" hotkey="r" plain onPress={() => void aggiornaConti($)}>
+            <Text color="cyan">↻ aggiorna</Text>
+          </Button>
+        </Box>
+      </Box>
+      <Text dimColor>{'─'.repeat(larghezza)}</Text>
+      <Text dimColor>{testoQui(sessione)}</Text>
+      {s.conti.length === 0 && !s.errore ? <Text dimColor>Nessun dato ancora.</Text> : null}
+      {s.conti.map(riquadro)}
+      {s.errore ? (
+        <Box marginTop={1}>
+          <Text color="red">{`Errore: ${s.errore}`}</Text>
+        </Box>
+      ) : null}
     </Box>
   )
 }
