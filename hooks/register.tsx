@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, RenderInput, Register, SessionContextUsage, SessionRateLimit, Timer } from 'claude-code'
+import type { EngineInterface, FsEntry, RenderInput, Register, SessionContextUsage, SessionRateLimit, Timer } from 'claude-code'
 
 import type { ImmagineIncollata, Ripresa } from '../types'
 import {
@@ -20,9 +20,9 @@ import { PANNELLO_MODIFICHE, apriModifiche, disegnaModifiche, fileModificati, fo
 import { cartellaSessione } from './sessione'
 import { aggiornaCodex, codexDaMostrare } from './codex-uso'
 import { registraCopia, rispostaFinita } from './copia'
-import { fitRow, imageNumbers, pngSize } from './layout'
+import { EXTENSIONS, type Format, decodeImage, formatOf, imageSize } from './formati'
+import { fitRow, imageNumbers } from './layout'
 import { type Anteprima, registraLetture } from './letture'
-import { decodeThumbnail } from './png'
 import { fromBase64, rasterCells, toBase64 } from './raster'
 import {
   AUTONOMO,
@@ -207,14 +207,26 @@ async function annullaRipresa($: EngineInterface) {
   await update($, agentiFalliti, () => [])
 }
 
-// Copre la miniatura più grande (32 x 6 celle = 32 x 12 pixel a mezzi blocchi) con margine per la media.
-const LATO_MINIATURA = 64
+// Il riquadro più grande è 32 x 6 celle: a 10 x 20 pixel per cella (Windows Terminal via Sixel) fanno 320 x 120.
+const MINIATURA_IMMAGINI = { width: 320, height: 120 }
+// A mezzi blocchi lo stesso riquadro vale 32 x 12 pixel: 64 lascia margine per la media.
+const MINIATURA_BLOCCHI = { width: 64, height: 64 }
+// Il massimo che $.fs.read concede.
+const MAX_LETTURA = 4 * 1024 * 1024
+// Quanto aspetta la decodifica, perché la banda disegni prima il riquadro vuoto: decodificare tiene occupato il worker.
+const RESPIRO_MS = 20
 // Un'immagine citata nel prompt ma non ancora su disco si cerca di nuovo a questi intervalli, poi si lascia stare.
 const RITENTA_MS = [250, 1000, 3000]
 
 // Decisa in session.start; un ridisegno della riga di suggerimento può chiedere una sincronizzazione prima.
-let fissaAnteprima: (anteprima: Anteprima) => void = () => {}
-const anteprima = new Promise<Anteprima>(resolve => (fissaAnteprima = resolve))
+let risolviAnteprima: (anteprima: Anteprima) => void = () => {}
+const anteprima = new Promise<Anteprima>(resolve => (risolviAnteprima = resolve))
+// La stessa scelta da leggere senza attendere: dopo un reload la banda può ridisegnarsi prima di session.start.
+let anteprimaDecisa: Anteprima | undefined
+function fissaAnteprima(scelta: Anteprima) {
+  anteprimaDecisa ??= scelta
+  risolviAnteprima(scelta)
+}
 // I numeri delle immagini disegnate, così un prompt invariato non tocca né il disco né lo stato;
 // undefined finché il disegno è incompleto o, dopo un reload, sconosciuto.
 let chiaveMostrata: string | undefined
@@ -223,7 +235,10 @@ let chiaveMancante: string | undefined
 let ricerche = 0
 let inAttesa: { bozza: string; ritenta: boolean } | undefined
 let sincronizzando = false
+// Per `<cartella>/<n>`, così ogni immagine si cerca, si legge e si decodifica una volta sola.
 const descritte = new Map<string, Omit<ImmagineIncollata, 'n'>>()
+const daDecodificare = new Map<string, { n: number; bytes: Uint8Array; formato: Format }>()
+let decodificando = false
 
 async function terminaleConImmagini($: EngineInterface): Promise<boolean> {
   if ((await $.env.get('TMUX')) || (await $.env.get('STY'))) return false
@@ -240,39 +255,80 @@ async function cartellaImmagini($: EngineInterface): Promise<string | undefined>
   return sessione && `${sessione}/images`
 }
 
-async function descrivi($: EngineInterface, cartella: string | undefined, n: number): Promise<ImmagineIncollata> {
-  const path = `${cartella}/${n}.png`
-  const giaVista = descritte.get(path)
+// Claude Code salva ogni immagine incollata come <n>.<estensione del suo formato>.
+async function fileImmagini($: EngineInterface, cartella: string): Promise<Map<number, FsEntry>> {
+  const voci = await $.fs.list(cartella).catch(() => [] as FsEntry[])
+  const file = new Map<number, FsEntry>()
+  for (const voce of voci) {
+    const parti = /^(\d+)\.(\w+)$/.exec(voce.name)
+    if (parti && voce.kind === 'file' && EXTENSIONS[parti[2]!.toLowerCase()] && !file.has(Number(parti[1]))) file.set(Number(parti[1]), voce)
+  }
+  return file
+}
+
+async function descrivi($: EngineInterface, cartella: string | undefined, n: number, file: Map<number, FsEntry>): Promise<ImmagineIncollata> {
+  const chiave = `${cartella}/${n}`
+  const giaVista = descritte.get(chiave)
   if (giaVista) return { n, ...giaVista }
-  if (cartella === undefined || !(await $.fs.exists(path))) return { n, path: null, size: null }
-  if ((await anteprima) === 'etichette') {
-    descritte.set(path, { path, size: null })
-    return { n, path, size: null }
-  }
+  const voce = file.get(n)
+  if (cartella === undefined || !voce) return { n, path: null, size: null }
+  const path = `${cartella}/${voce.name}`
+  const modo = await anteprima
 
-  // Oltre i 4 MiB che $.fs.read concede: si disegna comunque dal file, solo senza proporzioni.
-  const base64 = await $.fs.read(path, { as: 'bytes' }).then(
-    r => r.base64,
-    () => undefined,
-  )
-  const size = base64 === undefined ? null : pngSize(base64)
-  if (base64 !== undefined && size === null) return { n, path: null, size: null }
-
-  let immagine: Omit<ImmagineIncollata, 'n'> = { path, size }
-  if ((await anteprima) === 'blocchi') {
-    let thumbnail: ImmagineIncollata['thumbnail'] = null
-    if (base64 !== undefined) {
-      try {
-        const decodificata = decodeThumbnail(fromBase64(base64), LATO_MINIATURA, LATO_MINIATURA)
-        thumbnail = { width: decodificata.width, height: decodificata.height, rgba: toBase64(decodificata.rgba) }
-      } catch {
-        // PNG interlacciato o danneggiato: il riquadro mostra il tag al posto della miniatura.
-      }
+  let immagine: Omit<ImmagineIncollata, 'n'>
+  if (modo === 'etichette') {
+    immagine = { path, size: null }
+  } else if (voce.size > MAX_LETTURA) {
+    const png = EXTENSIONS[voce.name.split('.').pop()!.toLowerCase()] === 'png'
+    immagine = { path, size: null, anteprima: png && modo === 'immagini' ? { tipo: 'file' } : { tipo: 'nota', testo: 'oltre 4 MiB' } }
+  } else {
+    const bytes = await $.fs.read(path, { as: 'bytes' }).then(
+      r => fromBase64(r.base64),
+      () => undefined,
+    )
+    const formato = bytes && formatOf(bytes)
+    const size = formato ? imageSize(bytes, formato) : null
+    if (!bytes || !formato || !size) {
+      immagine = { path, size: null, anteprima: { tipo: 'nota', testo: `[Image #${n}]` } }
+    } else if (formato === 'webp') {
+      immagine = { path, size, anteprima: { tipo: 'nota', testo: 'WebP: niente anteprima' } }
+    } else {
+      immagine = { path, size }
+      daDecodificare.set(chiave, { n, bytes, formato })
     }
-    immagine = { ...immagine, thumbnail }
   }
-  descritte.set(path, immagine)
+  descritte.set(chiave, immagine)
   return { n, ...immagine }
+}
+
+// Una decodifica per giro di timer, ciascuna col suo aggiornamento: la prima miniatura non aspetta le altre.
+function decodificaInSeguito($: EngineInterface) {
+  if (decodificando || daDecodificare.size === 0) return
+  decodificando = true
+  $.clock.after(RESPIRO_MS, async () => {
+    try {
+      const [chiave, { n, bytes, formato }] = daDecodificare.entries().next().value!
+      daDecodificare.delete(chiave)
+      const lato = (await anteprima) === 'immagini' ? MINIATURA_IMMAGINI : MINIATURA_BLOCCHI
+      let fatta: NonNullable<ImmagineIncollata['anteprima']>
+      try {
+        const miniatura = decodeImage(bytes, formato, lato.width, lato.height)
+        fatta = { tipo: 'pixel', width: miniatura.width, height: miniatura.height, rgba: toBase64(miniatura.rgba) }
+      } catch {
+        // PNG interlacciato, JPEG aritmetico o file danneggiato: il riquadro mostra il tag.
+        fatta = { tipo: 'nota', testo: `[Image #${n}]` }
+      }
+      const vista = descritte.get(chiave)
+      if (!vista) return
+      descritte.set(chiave, { ...vista, anteprima: fatta })
+      await update($, immagini, lista =>
+        lista.some(i => i.path === vista.path) ? lista.map(i => (i.path === vista.path ? { ...i, anteprima: fatta } : i)) : lista,
+      )
+    } finally {
+      decodificando = false
+      decodificaInSeguito($)
+    }
+  })
 }
 
 async function mostra($: EngineInterface, bozza: string, ritenta: boolean) {
@@ -283,9 +339,12 @@ async function mostra($: EngineInterface, bozza: string, ritenta: boolean) {
   if (chiave !== chiaveMancante) ricerche = 0
 
   const cartella = numeri.length > 0 ? await cartellaImmagini($) : undefined
+  const daCercare = cartella !== undefined && numeri.some(n => !descritte.has(`${cartella}/${n}`))
+  const file = daCercare ? await fileImmagini($, cartella) : new Map<number, FsEntry>()
   const lista: ImmagineIncollata[] = []
-  for (const n of numeri) lista.push(await descrivi($, cartella, n))
+  for (const n of numeri) lista.push(await descrivi($, cartella, n, file))
   await update($, immagini, () => lista)
+  decodificaInSeguito($)
 
   if (lista.every(immagine => immagine.path !== null)) {
     chiaveMostrata = chiave
@@ -298,8 +357,8 @@ async function mostra($: EngineInterface, bozza: string, ritenta: boolean) {
   if (attesa !== undefined) $.clock.after(attesa, async () => sincronizza($, (await $.prompt.read()).text, true))
 }
 
-// Gira su un timer suo e non dentro l'hook che l'ha chiesta, così decodificare un'immagine grande
-// non blocca l'editor né consuma il budget dell'hook. Le modifiche ravvicinate si fondono nell'ultima.
+// Gira su un timer suo e non dentro l'hook che l'ha chiesta, così leggere i file non blocca
+// l'editor né consuma il budget dell'hook. Le modifiche ravvicinate si fondono nell'ultima.
 function sincronizza($: EngineInterface, bozza: string, ritenta = false) {
   inAttesa = { bozza, ritenta: ritenta || (inAttesa?.ritenta ?? false) }
   if (sincronizzando) return
@@ -318,13 +377,15 @@ function sincronizza($: EngineInterface, bozza: string, ritenta = false) {
 }
 
 /** La riga di miniature (o di sole etichette) sopra la barra, o null quando nel prompt non ci sono immagini. */
-async function rigaImmagini($: EngineInterface, e: RenderInput<'AbovePrompt'>, soloEtichette: boolean) {
+async function rigaImmagini($: EngineInterface, e: RenderInput<'AbovePrompt'>) {
   if (e.surface !== 'terminal') return null
   const lista = await read($, immagini)
   if (lista.length === 0) return null
 
+  const modo = anteprimaDecisa
+  if (modo === undefined) return null
   const { Box, Button, Image, Raster, Text } = $.ui.resolve(e)
-  if (soloEtichette) {
+  if (modo === 'etichette') {
     return (
       <Box flexDirection="row" columnGap={2}>
         {lista.map(immagine =>
@@ -351,32 +412,33 @@ async function rigaImmagini($: EngineInterface, e: RenderInput<'AbovePrompt'>, s
     <Box flexDirection="row" columnGap={1}>
       {lista.map((immagine, i) => {
         const { columns, rows } = celle[i] ?? { columns: 4, rows: 1 }
-        const miniatura = immagine.thumbnail
+        const a = immagine.anteprima
+        const testo = (contenuto: string) => (
+          <Box width={columns} height={rows} alignItems="center" justifyContent="center">
+            <Text dimColor wrap="truncate">{contenuto}</Text>
+          </Box>
+        )
         return (
           <Box flexDirection="column" alignItems="center" borderStyle="round" borderDimColor>
             {immagine.path === null ? (
-              <Box width={columns} height={rows} alignItems="center" justifyContent="center">
-                <Text dimColor wrap="truncate">nessuna anteprima</Text>
-              </Box>
-            ) : miniatura ? (
+              testo('nessuna anteprima')
+            ) : a?.tipo === 'pixel' && modo === 'blocchi' ? (
               <Raster
                 key={`immagine-${immagine.n}`}
                 columns={columns}
                 rows={rows}
-                cells={rasterCells({ ...miniatura, rgba: fromBase64(miniatura.rgba) }, columns, rows)}
+                cells={rasterCells({ ...a, rgba: fromBase64(a.rgba) }, columns, rows)}
               />
-            ) : miniatura === null ? (
-              <Box width={columns} height={rows} alignItems="center" justifyContent="center">
-                <Text dimColor wrap="truncate">[Image #{immagine.n}]</Text>
-              </Box>
-            ) : (
+            ) : a?.tipo === 'pixel' || a?.tipo === 'file' ? (
               <Image
                 key={`immagine-${immagine.n}`}
-                source={{ file: immagine.path, format: 'png' }}
+                source={a.tipo === 'pixel' ? { rgba: a.rgba, width: a.width, height: a.height } : { file: immagine.path, format: 'png' }}
                 columns={columns}
                 rows={rows}
                 alt={`[Image #${immagine.n}]`}
               />
+            ) : (
+              testo(a?.tipo === 'nota' ? a.testo : '…')
             )}
             {immagine.path === null ? (
               <Text dimColor>#{immagine.n}</Text>
@@ -686,7 +748,7 @@ export const register: Register = (on, options) => {
     const sotto = await next(e)
     // Le miniature le disegna infobar stesso: un Button arrivato da next(e) dentro l'albero di un
     // altro plugin non riceve i clic (Claude Code 2.1.288).
-    const miniature = await rigaImmagini($, e, scelta === 'etichette')
+    const miniature = await rigaImmagini($, e)
     const conto = conAccount ? await pulsanteConto($, e) : null
     const codex = conCodex ? await codexDaMostrare($, ora) : null
 

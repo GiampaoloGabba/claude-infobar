@@ -1,7 +1,5 @@
 import { inflateZlib } from './inflate'
-
-/** A small RGBA picture, row-major, 4 bytes per pixel. */
-export type Thumbnail = { width: number; height: number; rgba: Uint8Array }
+import { type Thumbnail, fitSize } from './pixels'
 
 const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }
@@ -10,7 +8,7 @@ const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }
 const SAMPLES = 4
 
 /** Decodes a PNG and box-averages it down to fit `maxWidth` x `maxHeight`, keeping its aspect ratio. */
-export function decodeThumbnail(png: Uint8Array, maxWidth: number, maxHeight: number): Thumbnail {
+export function decodePng(png: Uint8Array, maxWidth: number, maxHeight: number): Thumbnail {
   if (png.length < 33 || SIGNATURE.some((byte, i) => png[i] !== byte)) throw new Error('not a PNG')
   const view = new DataView(png.buffer, png.byteOffset, png.byteLength)
 
@@ -59,9 +57,7 @@ export function decodeThumbnail(png: Uint8Array, maxWidth: number, maxHeight: nu
   const raw = inflateZlib(compressed, height * (stride + 1))
   unfilter(raw, height, stride, filterStep)
 
-  const scale = Math.min(1, maxWidth / width, maxHeight / height)
-  const thumbWidth = Math.max(1, Math.round(width * scale))
-  const thumbHeight = Math.max(1, Math.round(height * scale))
+  const { width: thumbWidth, height: thumbHeight } = fitSize(width, height, maxWidth, maxHeight)
   const sums = new Float64Array(thumbWidth * thumbHeight * 4)
   const counts = new Uint32Array(thumbWidth * thumbHeight)
   const xStep = Math.max(1, Math.floor(width / (thumbWidth * SAMPLES)))
@@ -97,41 +93,38 @@ export function decodeThumbnail(png: Uint8Array, maxWidth: number, maxHeight: nu
   return { width: thumbWidth, height: thumbHeight, rgba }
 }
 
+// One loop per filter type rather than a switch per byte: this runs over every byte of the picture.
 function unfilter(raw: Uint8Array, height: number, stride: number, step: number) {
   for (let y = 0; y < height; y++) {
     const start = y * (stride + 1) + 1
-    const above = start - (stride + 1)
+    const end = start + stride
     const filter = raw[start - 1]!
-    const hasAbove = y > 0
-    for (let i = 0; i < stride; i++) {
-      const left = i >= step ? raw[start + i - step]! : 0
-      const up = hasAbove ? raw[above + i]! : 0
-      let value: number
-      switch (filter) {
-        case 0:
-          continue
-        case 1:
-          value = left
-          break
-        case 2:
-          value = up
-          break
-        case 3:
-          value = (left + up) >> 1
-          break
-        case 4: {
-          const upLeft = hasAbove && i >= step ? raw[above + i - step]! : 0
-          const p = left + up - upLeft
-          const pa = Math.abs(p - left)
-          const pb = Math.abs(p - up)
-          const pc = Math.abs(p - upLeft)
-          value = pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft
-          break
-        }
-        default:
-          throw new Error('bad PNG filter')
+    if (filter === 0) continue
+    if (filter === 1) {
+      for (let i = start + step; i < end; i++) raw[i] = (raw[i]! + raw[i - step]!) & 0xff
+    } else if (y === 0) {
+      // No row above: Up adds nothing, Average halves the left byte, Paeth picks the left byte.
+      if (filter === 3) for (let i = start + step; i < end; i++) raw[i] = (raw[i]! + (raw[i - step]! >> 1)) & 0xff
+      else if (filter === 4) for (let i = start + step; i < end; i++) raw[i] = (raw[i]! + raw[i - step]!) & 0xff
+      else if (filter !== 2) throw new Error('bad PNG filter')
+    } else if (filter === 2) {
+      for (let i = start; i < end; i++) raw[i] = (raw[i]! + raw[i - stride - 1]!) & 0xff
+    } else if (filter === 3) {
+      for (let i = start; i < start + step; i++) raw[i] = (raw[i]! + (raw[i - stride - 1]! >> 1)) & 0xff
+      for (let i = start + step; i < end; i++) raw[i] = (raw[i]! + ((raw[i - step]! + raw[i - stride - 1]!) >> 1)) & 0xff
+    } else if (filter === 4) {
+      for (let i = start; i < start + step; i++) raw[i] = (raw[i]! + raw[i - stride - 1]!) & 0xff
+      for (let i = start + step; i < end; i++) {
+        const left = raw[i - step]!
+        const up = raw[i - stride - 1]!
+        const upLeft = raw[i - stride - 1 - step]!
+        const pa = Math.abs(up - upLeft)
+        const pb = Math.abs(left - upLeft)
+        const pc = Math.abs(left + up - 2 * upLeft)
+        raw[i] = (raw[i]! + (pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft)) & 0xff
       }
-      raw[start + i] = (raw[start + i]! + value) & 0xff
+    } else {
+      throw new Error('bad PNG filter')
     }
   }
 }

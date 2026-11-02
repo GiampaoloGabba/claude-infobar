@@ -35,15 +35,17 @@ export type Ripresa = { at: number; motivo: string; tentativi: number }
 
 export type ImmagineIncollata = {
   n: number
-  /** Percorso assoluto del PNG in cache; null se non si trova. */
+  /** Percorso assoluto dell'immagine in cache; null se non si trova. */
   path: string | null
-  /** Dimensioni in pixel; null se ignote, e il riquadro prende una forma predefinita. */
+  /** Dimensioni in pixel come si vede; null se ignote, e il riquadro prende una forma predefinita. */
   size: { width: number; height: number } | null
   /**
-   * Copia RGBA ridotta (base64) disegnata a mezzi blocchi colorati, presente solo dove il terminale
-   * non sa disegnare il PNG; null se non si è potuta decodificare.
+   * Cosa disegnare nel riquadro; assente mentre la decodifica è in corso, e sempre con le sole etichette.
+   * `pixel`: la copia ridotta in RGBA (base64), passata inline all'Image o ai mezzi blocchi.
+   * `file`: un PNG oltre i 4 MiB leggibili, che il terminale legge da sé (solo in locale).
+   * `nota`: il testo al posto dell'immagine, dove non si è potuta decodificare.
    */
-  thumbnail?: { width: number; height: number; rgba: string } | null
+  anteprima?: { tipo: 'pixel'; width: number; height: number; rgba: string } | { tipo: 'file' } | { tipo: 'nota'; testo: string }
 }
 
 export type FinestraConto = { pct: number; clock: string }

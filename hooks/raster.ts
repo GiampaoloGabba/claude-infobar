@@ -1,4 +1,4 @@
-import type { Thumbnail } from './png'
+import type { Thumbnail } from './pixels'
 
 const UPPER_HALF = 0x2580
 const LOWER_HALF = 0x2584
