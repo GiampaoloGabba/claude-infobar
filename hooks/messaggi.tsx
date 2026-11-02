@@ -19,7 +19,7 @@ const RACCOLTA_MS = 50
 const ORIGINI = new Set(['composer', 'bridge', 'unclassified'])
 // Quanto resta acceso il messaggio a cui il pannello ti ha portato: basta a trovarlo con l'occhio.
 const LAMPEGGIO_MS = 1200
-const SFONDO_LAMPEGGIO = '#5c4a00'
+const SFONDO_LAMPEGGIO = 'warning'
 
 const inAttesa: MessaggioUtente[] = []
 let raccolta = false
@@ -213,7 +213,7 @@ export async function disegnaMessaggi($: EngineInterface, e: RenderInput<'Pane'>
       {/* Prima del campo non compare né sparisce niente mentre scrivi: un elemento in più lì sposta il fuoco
           fuori dal campo, e le lettere successive finiscono nel prompt. */}
       <Box marginTop={1}>
-        <Text bold color="yellow">{filtro.trim() ? `MESSAGGI · ${trovati.length} di ${lista.length}` : `MESSAGGI · ${lista.length}`}</Text>
+        <Text bold color="warning">{filtro.trim() ? `MESSAGGI · ${trovati.length} di ${lista.length}` : `MESSAGGI · ${lista.length}`}</Text>
       </Box>
       {/* Invio svuota il campo da sé: a ogni Invio il campo si ridisegna con una chiave nuova, che lo riparte
           dal filtro, così la parola cercata resta scritta lì. */}
@@ -235,7 +235,7 @@ export async function disegnaMessaggi($: EngineInterface, e: RenderInput<'Pane'>
         <Text dimColor>{'─'.repeat(Math.max(1, larghezza - (filtro.trim() ? AZZERA.length + 1 : 0)))}</Text>
         {filtro.trim() ? (
           <Button key="azzera" plain onPress={() => azzera($)}>
-            <Text color="cyan">{` ${AZZERA}`}</Text>
+            <Text color="suggestion">{` ${AZZERA}`}</Text>
           </Button>
         ) : null}
       </Box>
@@ -253,7 +253,7 @@ export async function disegnaMessaggi($: EngineInterface, e: RenderInput<'Pane'>
                 <Text dimColor>{prefisso}</Text>
                 {estratto(m.testo, filtro, larghezza - prefisso.length).map((pezzo, i) =>
                   pezzo.trovato ? (
-                    <Text key={`p${i}`} color="yellow" bold>{pezzo.testo}</Text>
+                    <Text key={`p${i}`} color="warning" bold>{pezzo.testo}</Text>
                   ) : (
                     <Text key={`p${i}`}>{pezzo.testo}</Text>
                   ),
@@ -262,12 +262,12 @@ export async function disegnaMessaggi($: EngineInterface, e: RenderInput<'Pane'>
               <Box position="absolute" top={0} right={0} flexDirection="row" display="none" hover={{ display: 'flex' }}>
                 <Text>{'  '}</Text>
                 <Button key={`copia-msg-${m.id}`} plain onPress={(press: UiPressArgument) => copia($, m.testo, 'Messaggio', press)}>
-                  <Text color="cyan" inverse>{` ${AZIONE_TESTO} `}</Text>
+                  <Text color="suggestion" inverse>{` ${AZIONE_TESTO} `}</Text>
                 </Button>
                 {m.risposta ? <Text>{' '}</Text> : null}
                 {m.risposta ? (
                   <Button key={`copia-risp-${m.id}`} plain onPress={(press: UiPressArgument) => copia($, m.risposta!, 'Risposta', press)}>
-                    <Text color="cyan" inverse>{` ${AZIONE_RISPOSTA} `}</Text>
+                    <Text color="suggestion" inverse>{` ${AZIONE_RISPOSTA} `}</Text>
                   </Button>
                 ) : null}
               </Box>
@@ -307,7 +307,7 @@ export function registraMessaggi(on: On) {
     return (
       <Box flexDirection="column" marginTop={1} backgroundColor={SFONDO_LAMPEGGIO}>
         {e.props.text.split('\n').map((r, i) => (
-          <Text key={`r${i}`} color="white" bold>{`${i === 0 ? '❯ ' : '  '}${r}`}</Text>
+          <Text key={`r${i}`} color="inverseText" bold>{`${i === 0 ? '❯ ' : '  '}${r}`}</Text>
         ))}
       </Box>
     )

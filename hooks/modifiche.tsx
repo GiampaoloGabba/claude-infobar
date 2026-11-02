@@ -152,11 +152,11 @@ export async function apriModifiche($: EngineInterface) {
 }
 
 const SEGNO: Record<FileGit['stato'], { segno: string; colore: string }> = {
-  nuovo: { segno: '+', colore: 'green' },
-  modificato: { segno: '~', colore: 'yellow' },
-  eliminato: { segno: '−', colore: 'red' },
-  rinominato: { segno: '→', colore: 'cyan' },
-  conflitto: { segno: '!', colore: 'red' },
+  nuovo: { segno: '+', colore: 'success' },
+  modificato: { segno: '~', colore: 'warning' },
+  eliminato: { segno: '−', colore: 'error' },
+  rinominato: { segno: '→', colore: 'suggestion' },
+  conflitto: { segno: '!', colore: 'error' },
 }
 
 export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'>, opzioneEditor: string | undefined) {
@@ -173,7 +173,7 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
   if (!stato)
     return (
       <Box flexDirection="column" marginTop={1}>
-        <Text bold color="yellow">FILE MODIFICATI</Text>
+        <Text bold color="warning">FILE MODIFICATI</Text>
         <Text dimColor>{'─'.repeat(larghezza)}</Text>
         <Text dimColor>La cartella della sessione non è in un repository git.</Text>
       </Box>
@@ -185,7 +185,7 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
   const pezzi = (testo: string, colore?: string, extra: { bold?: boolean; dimColor?: boolean } = {}) =>
     segna(testo, parole).map((p, i) =>
       p.trovato ? (
-        <Text key={`t${i}`} color="yellow" bold>{p.testo}</Text>
+        <Text key={`t${i}`} color="warning" bold>{p.testo}</Text>
       ) : (
         <Text key={`t${i}`} color={colore} {...extra}>{p.testo}</Text>
       ),
@@ -212,25 +212,25 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
               {cartella ? <Text dimColor>{'  '}</Text> : null}
               {cartella ? <Text>{pezzi(cartella, undefined, { dimColor: true })}</Text> : null}
               {f.da ? <Text dimColor>{`  ← ${f.da}`}</Text> : null}
-              {f.stato === 'conflitto' ? <Text color="red">{'  conflitto'}</Text> : null}
+              {f.stato === 'conflitto' ? <Text color="error">{'  conflitto'}</Text> : null}
             </Text>
           </Box>
           <Box flexShrink={0} flexDirection="row" columnGap={2} marginLeft={2}>
             <Box width={largConti} justifyContent="flex-end">
               {conti ? (
                 <Text>
-                  <Text color="green">{`+${f.aggiunte ?? 0}`}</Text>
-                  <Text color="red">{` −${f.tolte ?? 0}`}</Text>
+                  <Text color="success">{`+${f.aggiunte ?? 0}`}</Text>
+                  <Text color="error">{` −${f.tolte ?? 0}`}</Text>
                 </Text>
               ) : null}
             </Box>
             <Button key={`diff-${f.path}`} plain onPress={() => mostraDiff($, f.path)}>
-              <Text color="cyan">{aperti.includes(f.path) ? '▴ diff' : '▾ diff'}</Text>
+              <Text color="suggestion">{aperti.includes(f.path) ? '▴ diff' : '▾ diff'}</Text>
             </Button>
             <Box width={6}>
               {f.stato !== 'eliminato' ? (
                 <Button key={`editor-${f.path}`} plain onPress={() => apriFile($, stato.radice, f, opzioneEditor)}>
-                  <Text color="cyan">↗ apri</Text>
+                  <Text color="suggestion">↗ apri</Text>
                 </Button>
               ) : null}
             </Box>
@@ -252,11 +252,11 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" justifyContent="space-between" marginTop={1}>
-        <Text bold color="yellow">{parole.length ? `FILE MODIFICATI · ${visibili.length} di ${stato.file.length}` : `FILE MODIFICATI · ${stato.file.length}`}</Text>
+        <Text bold color="warning">{parole.length ? `FILE MODIFICATI · ${visibili.length} di ${stato.file.length}` : `FILE MODIFICATI · ${stato.file.length}`}</Text>
         {stato.file.length ? (
           <Text>
-            <Text color="green">{`+${totale.aggiunte}`}</Text>
-            <Text color="red">{` −${totale.tolte}`}</Text>
+            <Text color="success">{`+${totale.aggiunte}`}</Text>
+            <Text color="error">{` −${totale.tolte}`}</Text>
           </Text>
         ) : null}
       </Box>
@@ -291,7 +291,7 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
               await $.ui.focus({ requestId: PANNELLO_MODIFICHE, key: `cerca-${nuovo}` }).catch(() => undefined)
             }}
           >
-            <Text color="cyan">{` ${AZZERA}`}</Text>
+            <Text color="suggestion">{` ${AZZERA}`}</Text>
           </Button>
         ) : null}
       </Box>

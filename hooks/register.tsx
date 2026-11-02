@@ -849,19 +849,19 @@ export const register: Register = (on, options) => {
             <Box key="cartella" flexShrink={0} flexDirection="row">
               <Text>
                 <Text dimColor>{sep1}</Text>
-                <Text bold color="yellow">{dirMostrata}</Text>
-                {ramo ? <Text color="cyan">{` (${ramoMostrato})`}</Text> : null}
+                <Text bold color="warning">{dirMostrata}</Text>
+                {ramo ? <Text color="suggestion">{` (${ramoMostrato})`}</Text> : null}
               </Text>
               {modificati ? (
                 <Button key="modifiche" plain onPress={() => void alterna($, PANNELLO_MODIFICHE, () => apriModifiche($))}>
-                  <Text color="yellow">{` ✎ ${modificati}`}</Text>
+                  <Text color="warning">{` ✎ ${modificati}`}</Text>
                 </Button>
               ) : null}
             </Box>
           ) : modificati ? (
             <Box key="modifiche" flexShrink={0}>
               <Button key="modifiche" plain onPress={() => void alterna($, PANNELLO_MODIFICHE, () => apriModifiche($))}>
-                <Text color="yellow">{` ✎ ${modificati}`}</Text>
+                <Text color="warning">{` ✎ ${modificati}`}</Text>
               </Button>
             </Box>
           ) : null}
@@ -879,7 +879,7 @@ export const register: Register = (on, options) => {
           <Box key="turno" flexShrink={0}>
             {occupati ? (
               <Button key="lavori" plain onPress={() => void alterna($, PANNELLO_LAVORI, () => apriLavori($))}>
-                <Text color="yellow">{`◷ ${occupati}`}</Text>
+                <Text color="warning">{`◷ ${occupati}`}</Text>
               </Button>
             ) : turno ? (
               <Text dimColor>…</Text>
@@ -891,7 +891,7 @@ export const register: Register = (on, options) => {
             <Box key="autorizzazioni" flexShrink={0}>
               <Text>
                 <Text dimColor>{sep}</Text>
-                <Text color="cyan">{autorizz}</Text>
+                <Text color="suggestion">{autorizz}</Text>
               </Text>
             </Box>
           ) : null}
@@ -899,7 +899,7 @@ export const register: Register = (on, options) => {
             <Box key="ripresa" flexShrink={0}>
               <Text>
                 <Text dimColor>{sep}</Text>
-                <Text color="magenta">{`ripresa ${orario(r.at)} `}</Text>
+                <Text color="merged">{`ripresa ${orario(r.at)} `}</Text>
               </Text>
               <Button key="annulla-ripresa" label="annulla" plain onPress={() => annullaRipresa($)} />
             </Box>
@@ -942,7 +942,7 @@ export const register: Register = (on, options) => {
           <Box key="messaggi" flexShrink={0}>
             <Text dimColor>{sep}</Text>
             <Button key="messaggi" plain onPress={() => void alterna($, PANNELLO_MESSAGGI, () => apriMessaggi($))}>
-              <Text color="cyan">{numeroMessaggi ? `≡${numeroMessaggi}` : '≡'}</Text>
+              <Text color="cyan" bold>{numeroMessaggi ? `≡${numeroMessaggi}` : '≡'}</Text>
             </Button>
           </Box>
         </Box>

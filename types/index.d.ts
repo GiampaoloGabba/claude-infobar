@@ -23,6 +23,8 @@ export type Lavoro = {
   descrizione: string
   /** La riga di comando, per i comandi. */
   comando?: string
+  /** Il subagent che l'ha avviato (il suo id in `$.agent.list()`); assente se l'ha avviato la sessione principale. */
+  agente?: string
   /** Quando la mod l'ha visto la prima volta: per quelli scoperti a fine turno, un po' dopo la partenza. */
   inizio: number
   stato: 'in corso' | 'completato' | 'fallito' | 'fermato' | 'finito'

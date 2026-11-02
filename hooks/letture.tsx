@@ -375,7 +375,14 @@ function senzaDoppioni(links: Link[]): Link[] {
 
 type EsitoComando = { result?: unknown; isError?: boolean }
 
-async function conTrovati<R>($: EngineInterface, id: string, comando: string, descrizione: string | undefined, esegui: () => Promise<R>) {
+async function conTrovati<R>(
+  $: EngineInterface,
+  id: string,
+  comando: string,
+  descrizione: string | undefined,
+  agente: string | undefined,
+  esegui: () => Promise<R>,
+) {
   const inizio = await $.clock.now()
   const esito = await esegui()
   try {
@@ -386,7 +393,7 @@ async function conTrovati<R>($: EngineInterface, id: string, comando: string, de
       if (taskId) {
         const file = fileOutputNelTesto((esito as { text?: unknown }).text?.toString() ?? '')
         if (file) ricordaFileOutput(file)
-        await lavoroAvviato($, taskId, descrizione || comando, comando)
+        await lavoroAvviato($, taskId, descrizione || comando, comando, agente)
         void sorvegliaOutput($, id, taskId, comando)
       }
       else {
@@ -423,8 +430,8 @@ export function registraLetture(on: On, anteprima: Promise<Anteprima> | null, op
       return esito
     })
 
-  on('tool.call', { tool: 'Bash' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, e.description, () => next(e)))
-  on('tool.call', { tool: 'PowerShell' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, e.description, () => next(e)))
+  on('tool.call', { tool: 'Bash' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, e.description, e.agentId, () => next(e)))
+  on('tool.call', { tool: 'PowerShell' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, e.description, e.agentId, () => next(e)))
 
   const immagini = anteprima !== null
 

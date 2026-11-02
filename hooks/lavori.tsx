@@ -31,10 +31,16 @@ type Riepilogo = { id: string; type: string; status: string; description: string
 
 const inCorso = (l: Lavoro) => l.stato === 'in corso'
 
+// Il watch di un artifact pubblicato è un `monitor` che Claude Code apre da sé, non un lavoro avviato:
+// si riconosce solo dalla descrizione, perché anche un Monitor vero ha quel tipo.
+const WATCH_ARTIFACT = /^live updates for artifact\b/i
+const gestitoDaClaude = (descrizione: string) => WATCH_ARTIFACT.test(descrizione)
+
 function inserisci(lista: readonly Lavoro[], nuovo: Lavoro): Lavoro[] {
   const vecchio = lista.find(l => l.id === nuovo.id)
   if (!vecchio) return [...lista, nuovo]
-  return lista.map(l => (l.id === nuovo.id ? { ...nuovo, inizio: vecchio.inizio, comando: nuovo.comando ?? vecchio.comando } : l))
+  // Il riepilogo di fine turno non sa il comando né chi l'ha avviato: restano quelli visti alla partenza.
+  return lista.map(l => (l.id === nuovo.id ? { ...vecchio, ...nuovo, inizio: vecchio.inizio } : l))
 }
 
 function chiudi(l: Lavoro, stato: Lavoro['stato'], ora: number): Lavoro {
@@ -52,8 +58,8 @@ function conEsito(l: Lavoro, stato: Lavoro['stato'], ora: number): Lavoro {
  * l'elenco degli agenti). Uno che c'era e non c'è più è finito, senza sapere come.
  */
 export function conRiepilogo(lista: readonly Lavoro[], riepilogo: readonly Riepilogo[], ora: number): Lavoro[] {
-  const attivi = riepilogo.filter(t => t.type !== 'subagent')
-  let nuova = lista.map(l => (l.tipo !== 'subagent' && !attivi.some(t => t.id === l.id) ? chiudi(l, 'finito', ora) : l))
+  const attivi = riepilogo.filter(t => t.type !== 'subagent' && !gestitoDaClaude(t.description))
+  let nuova = lista.filter(l => !gestitoDaClaude(l.descrizione)).map(l => (l.tipo !== 'subagent' && !attivi.some(t => t.id === l.id) ? chiudi(l, 'finito', ora) : l))
   for (const t of attivi)
     nuova = inserisci(nuova, {
       id: t.id,
@@ -151,8 +157,10 @@ export async function lavoroFermato($: EngineInterface, id: string) {
 }
 
 /** Un comando appena mandato in background: compare subito, senza aspettare la fine del turno. */
-export async function lavoroAvviato($: EngineInterface, id: string, descrizione: string, comando: string) {
-  await cambia($, (lista, ora) => inserisci(lista, { id, tipo: 'shell', descrizione, comando, inizio: ora, stato: 'in corso' }))
+export async function lavoroAvviato($: EngineInterface, id: string, descrizione: string, comando: string, agente?: string) {
+  await cambia($, (lista, ora) =>
+    inserisci(lista, { id, tipo: 'shell', descrizione, comando, ...(agente ? { agente } : {}), inizio: ora, stato: 'in corso' }),
+  )
 }
 
 async function fileOutput($: EngineInterface, id: string): Promise<string | null> {
@@ -244,12 +252,14 @@ async function ferma($: EngineInterface, l: Lavoro) {
 
 const ICONE: Record<string, string> = { shell: '$', subagent: '◆', workflow: '⚙', monitor: '◉' }
 const COLORE_STATO: Record<Lavoro['stato'], string | undefined> = {
-  'in corso': 'yellow',
-  completato: 'green',
-  fallito: 'red',
+  'in corso': 'warning',
+  completato: 'success',
+  fallito: 'error',
   fermato: undefined,
-  finito: 'green',
+  finito: undefined,
 }
+// Il ✓ basta a dire che è andato bene; un esito storto si scrive anche a parole.
+const ESITO_DA_DIRE = new Set<Lavoro['stato']>(['fallito', 'fermato'])
 const SEGNO_STATO: Record<Lavoro['stato'], string> = { 'in corso': '◷', completato: '✓', fallito: '✗', fermato: '■', finito: '✓' }
 
 // Nell'editor, sull'ultima riga: si portano in primo piano da soli, a differenza del Blocco note lanciato
@@ -287,6 +297,13 @@ export async function disegnaLavori($: EngineInterface, e: RenderInput<'Pane'>, 
 
   const taglia = (testo: string, max = larghezza) => (testo.length > max ? `${testo.slice(0, Math.max(1, max - 1))}…` : testo)
 
+  const avviatoDa = (l: Lavoro, rientro = '') =>
+    l.agente ? (
+      <Text color="merged" wrap="truncate">
+        {taglia(`${rientro}↳ da ${ICONE.subagent} ${lista.find(a => a.id === l.agente)?.descrizione ?? 'un subagent'}`, larghezza - 2)}
+      </Text>
+    ) : null
+
   const pulsanti = (l: Lavoro) => {
     const percorso = datiOutput[l.id]?.file
     const aperto = aperti.includes(l.id)
@@ -298,17 +315,17 @@ export async function disegnaLavori($: EngineInterface, e: RenderInput<'Pane'>, 
             plain
             onPress={() => mostraOutput($, l.id)}
           >
-            <Text color="cyan">{aperto ? '▴ output' : '▾ output'}</Text>
+            <Text color="suggestion" inverse={aperto}>{aperto ? ' ▴ chiudi output ' : '▾ output'}</Text>
           </Button>
         ) : null}
         {percorso ? (
           <Button key={`apri-${l.id}`} plain onPress={() => apriOutput($, percorso, opzioni)}>
-            <Text color="cyan">↗ apri</Text>
+            <Text color="suggestion">↗ apri</Text>
           </Button>
         ) : null}
         {inCorso(l) ? (
           <Button key={`ferma-${l.id}`} plain onPress={() => ferma($, l)}>
-            <Text color="red" bold={daFermare === l.id} inverse={daFermare === l.id}>
+            <Text color="error" bold={daFermare === l.id} inverse={daFermare === l.id}>
               {daFermare === l.id ? ' ■ ferma? clicca di nuovo ' : '■ ferma'}
             </Text>
           </Button>
@@ -320,6 +337,11 @@ export async function disegnaLavori($: EngineInterface, e: RenderInput<'Pane'>, 
   const output = (l: Lavoro) =>
     aperti.includes(l.id) ? (
       <Box flexDirection="column" borderStyle="single" borderDimColor paddingX={1}>
+        <Box flexDirection="row" justifyContent="flex-end">
+          <Button key={`chiudi-${l.id}`} plain onPress={() => mostraOutput($, l.id)}>
+            <Text color="suggestion">✕</Text>
+          </Button>
+        </Box>
         {(datiOutput[l.id]?.intero ?? []).length ? (
           (datiOutput[l.id]?.intero ?? []).map((r, i) => (
             <Text key={`out-${l.id}-${i}`} wrap="truncate">
@@ -333,13 +355,14 @@ export async function disegnaLavori($: EngineInterface, e: RenderInput<'Pane'>, 
     ) : null
 
   const riquadroInCorso = (l: Lavoro) => (
-    <Box key={`lavoro-${l.id}`} flexDirection="column" borderStyle="round" borderColor="yellow" borderDimColor paddingX={1}>
+    <Box key={`lavoro-${l.id}`} flexDirection="column" borderStyle="round" borderColor="warning" borderDimColor paddingX={1}>
       <Box flexDirection="row" justifyContent="space-between">
         <Text bold wrap="truncate">
           {taglia(`${ICONE[l.tipo] ?? '·'} ${l.descrizione}`, larghezza - 8)}
         </Text>
-        <Text color="yellow">{formattaDurata(ora - l.inizio)}</Text>
+        <Text color="warning">{formattaDurata(ora - l.inizio)}</Text>
       </Box>
+      {avviatoDa(l)}
       {l.comando && l.comando !== l.descrizione ? (
         <Text dimColor wrap="truncate">
           {taglia(l.comando, larghezza - 2)}
@@ -348,7 +371,7 @@ export async function disegnaLavori($: EngineInterface, e: RenderInput<'Pane'>, 
       {aperti.includes(l.id)
         ? null
         : (datiOutput[l.id]?.coda ?? []).map((r, i) => (
-            <Text key={`coda-${l.id}-${i}`} color="gray" wrap="truncate">{`│ ${taglia(r, larghezza - 4)}`}</Text>
+            <Text key={`coda-${l.id}-${i}`} color="inactive" wrap="truncate">{`│ ${taglia(r, larghezza - 4)}`}</Text>
           ))}
       {output(l)}
       {pulsanti(l)}
@@ -357,14 +380,21 @@ export async function disegnaLavori($: EngineInterface, e: RenderInput<'Pane'>, 
 
   const rigaFinito = (l: Lavoro) => (
     <Box key={`lavoro-${l.id}`} flexDirection="column">
+      {/* La descrizione cede lo spazio: tempo e pulsanti stanno sempre interi, allineati a destra. */}
       <Box flexDirection="row" columnGap={2}>
-        <Text wrap="truncate">
-          <Text color={COLORE_STATO[l.stato]} dimColor={!COLORE_STATO[l.stato]}>{`${SEGNO_STATO[l.stato]} `}</Text>
-          <Text>{taglia(`${ICONE[l.tipo] ?? '·'} ${l.descrizione}`, Math.max(12, larghezza - 40))}</Text>
-          <Text dimColor>{`  ${l.stato} · ${formattaDurata(ora - (l.fine ?? ora))} fa`}</Text>
-        </Text>
-        {pulsanti(l)}
+        <Box flexGrow={1} flexShrink={1}>
+          <Text wrap="truncate">
+            <Text color={COLORE_STATO[l.stato]} dimColor={!COLORE_STATO[l.stato]}>{`${SEGNO_STATO[l.stato]} `}</Text>
+            <Text>{`${ICONE[l.tipo] ?? '·'} ${l.descrizione}`}</Text>
+            {ESITO_DA_DIRE.has(l.stato) ? <Text color={COLORE_STATO[l.stato]} dimColor={!COLORE_STATO[l.stato]}>{` · ${l.stato}`}</Text> : null}
+          </Text>
+        </Box>
+        <Box flexShrink={0}>
+          <Text dimColor>{`${formattaDurata(ora - (l.fine ?? ora))} fa`}</Text>
+        </Box>
+        <Box flexShrink={0}>{pulsanti(l)}</Box>
       </Box>
+      {avviatoDa(l, '  ')}
       {output(l)}
     </Box>
   )
@@ -378,7 +408,7 @@ export async function disegnaLavori($: EngineInterface, e: RenderInput<'Pane'>, 
 
   return (
     <Box flexDirection="column">
-      {titolo('IN CORSO', 'yellow', attivi.length)}
+      {titolo('IN CORSO', 'warning', attivi.length)}
       {attivi.length === 0 ? <Text dimColor>Nessun lavoro in corso.</Text> : attivi.map(riquadroInCorso)}
       {finiti.length ? (
         <Box flexDirection="column" marginTop={1}>
@@ -388,7 +418,7 @@ export async function disegnaLavori($: EngineInterface, e: RenderInput<'Pane'>, 
       ) : null}
       {diagnosi ? (
         <Box marginTop={1}>
-          <Text color="red" wrap="wrap">{`Output non letto: ${diagnosi}`}</Text>
+          <Text color="error" wrap="wrap">{`Output non letto: ${diagnosi}`}</Text>
         </Box>
       ) : null}
     </Box>

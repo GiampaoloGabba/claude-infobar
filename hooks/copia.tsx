@@ -90,7 +90,7 @@ async function pulsanti$($: EngineInterface, e: RenderInput<'AssistantMessage' |
     const chi = `${id}:${p.chiave}`
     return (
       <Button key={p.chiave} plain dimColor={premuto !== chi} onPress={(press: UiPressArgument) => copia($, e.requestId, p.testo, chi, press)}>
-        {premuto === chi ? <Text color="green">{'✓ copiato'}</Text> : <Text>{`⧉ ${p.etichetta}`}</Text>}
+        {premuto === chi ? <Text color="success">{'✓ copiato'}</Text> : <Text>{`⧉ ${p.etichetta}`}</Text>}
       </Button>
     )
   })

@@ -35,6 +35,19 @@ test('il riepilogo di fine turno aggiunge i lavori nuovi e chiude quelli spariti
   expect(dopo.find(l => l.id === 'x')).toBeUndefined()
 })
 
+test('il watch di un artifact non è un lavoro: non entra, e quello già in lista sparisce', () => {
+  const watch = 'live updates for artifact https://claude.ai/code/artifact/abc'
+  const dopo = conRiepilogo(
+    [{ ...shell('vecchio'), tipo: 'monitor', descrizione: watch }],
+    [
+      { id: 'nuovo', type: 'monitor', status: 'running', description: watch },
+      { id: 'm', type: 'monitor', status: 'running', description: 'tail del log di build' },
+    ],
+    5000,
+  )
+  expect(dopo.map(l => l.id)).toEqual(['m'])
+})
+
 test('dagli agenti: quelli in corso entrano, quelli finiti chiudono il loro lavoro con l\'esito', () => {
   const prima = [{ ...shell('ag1'), tipo: 'subagent' }]
   const dopo = conAgenti(
@@ -83,10 +96,10 @@ const BS = String.fromCharCode(92)
 const posix = (p: string) => p.replaceAll(BS, '/')
 const CARTELLA = 'C:/Temp/claude/E--work/sess-1/tasks'
 
-type Ospite = { fermati: unknown[]; comandi: string[][]; file: Record<string, string>; tasks: string; letture: Record<string, number> }
+type Ospite = { fermati: unknown[]; comandi: string[][]; file: Record<string, string>; tasks: string; letture: Record<string, number>; agenti: unknown[] }
 
 function ospite(on: On, sessione = 'sess-1'): Ospite {
-  const o: Ospite = { fermati: [], comandi: [], file: {}, tasks: CARTELLA, letture: {} }
+  const o: Ospite = { fermati: [], comandi: [], file: {}, tasks: CARTELLA, letture: {}, agenti: [] }
   const env: Record<string, string> = { OS: 'Windows_NT', TEMP: `C:${BS}Temp` }
   on('env.get', ($, e) => ({ value: env[e.name] }))
   on('session.id', () => ({ value: sessione }))
@@ -126,7 +139,7 @@ function ospite(on: On, sessione = 'sess-1'): Ospite {
   })
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.panes', () => ({ value: [{ id: 'lavori' }] }) as never)
-  on('agent.list', () => ({ value: [] }))
+  on('agent.list', () => ({ value: o.agenti }) as never)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['riga del motore'] }))
   return o
 }
@@ -235,8 +248,8 @@ test('la notifica di fine chiude il lavoro con il suo esito, anche dopo il riepi
   expect(await (await banda()).find({ type: 'Text', text: /◷/ })).toBeUndefined()
   const pannello = await $.ui.mount(PANNELLO)
   expect(await pannello.find({ type: 'Text', text: '✗ ' })).toBeDefined()
-  expect(await pannello.find({ type: 'Text', text: /completato/ })).toBeDefined()
-  expect(await pannello.find({ type: 'Text', text: /finito/ })).toBeUndefined()
+  expect(await pannello.find({ type: 'Text', text: ' · fallito' })).toBeDefined()
+  expect((await pannello.find({ type: 'Text', text: /^✓ $/ }))?.props).toMatchObject({ color: 'success' })
 })
 
 test("dopo /clear l'output resta nella cartella della prima sessione: il percorso lo dice Claude Code all'avvio", async ($, on) => {
@@ -251,6 +264,18 @@ test("dopo /clear l'output resta nella cartella della prima sessione: il percors
   expect(await ui.find({ type: 'Text', text: '$ server' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '│ pronto' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'output-b9' })).toBeDefined()
+})
+
+test('un comando avviato da un subagent dice da quale, anche dopo il riepilogo di fine turno', async ($, on) => {
+  mock.clock(on)
+  const o = ospite(on)
+  o.agenti = [{ id: 'ag7', description: 'review del parser', status: 'running' }]
+  await $.tool.call({ tool: 'Bash', command: 'pnpm test', description: 'test', run_in_background: true, agentId: 'ag7' } as never)
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b9', type: 'shell', status: 'running', description: 'test' }] } as never)
+  await $.command.run({ command: 'lavori', args: '' } as never)
+
+  const ui = await $.ui.mount(PANNELLO)
+  expect(await ui.find({ type: 'Text', text: '↳ da ◆ review del parser' })).toBeDefined()
 })
 
 test('un lavoro che Claude ferma con TaskStop esce subito dal conto della barra', async ($, on) => {

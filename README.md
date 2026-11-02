@@ -36,6 +36,8 @@ La barra compare solo nel terminale: nell'app desktop non viene disegnata, mentr
 
 I pulsanti della barra che aprono un pannello (il profilo, `✎`, `◷`, `≡`) funzionano da interruttore: il primo clic apre il pannello, un secondo clic lo chiude se è quello in vista, o lo porta davanti se è una scheda dietro un'altra. I comandi (`/modifiche`, `/lavori`, `/messaggi`, `/account`) invece aprono e basta.
 
+I colori di barra e pannelli seguono il tema di Claude Code (`/theme`), anche quelli chiari: giallo, verde e rosso sono le sue chiavi `warning`, `success` ed `error`. Fanno eccezione i nomi dei modelli, i link e `≡`, che hanno colori propri.
+
 Quando una riga intera non ci sta, si compatta un passo alla volta, solo quanto serve. La prima perde i `|`, poi scrive l'effort in due lettere (`lw` `md` `hi` `xh` `mx`, con lo stesso colore) e poi accorcia dal mezzo cartella e branch (non sotto gli 8 caratteri). La seconda perde la barra del contesto (resta la percentuale) e poi i `|`; senza separatori l'etichetta `codex` diventa bianca, così si vede dove cominciano i suoi limiti. Se non basta ancora, va a capo un pezzo intero alla volta, mai una parola a metà.
 
 In fondo alla seconda riga ci sono i limiti di utilizzo dell'abbonamento: la finestra di 5 ore, quella settimanale ed eventuali limiti settimanali per modello, ognuno con la percentuale usata e, in grigio, il tempo che manca al reset. La percentuale è la quota del limite già consumata e usa gli stessi colori del contesto: verde sotto il 50%, gialla fino all'80%, rossa oltre. Con una sola finestra (i piani senza limite di 5 ore) l'etichetta `7d` non compare: restano percentuale e reset. Senza abbonamento (chiave API) questa parte non compare.
@@ -141,11 +143,13 @@ Sulla riga di un comando Bash o PowerShell, a destra, c'è `⧉ copia comando`. 
 
 ## Lavori in background
 
-Un clic sul `◷ 3` della barra, o `/lavori`, apre un pannello con i lavori in background della sessione, in due sezioni. In alto `IN CORSO`: ogni lavoro in una cornice, con l'icona del tipo (`$` comando, `◆` subagent, `⚙` workflow, `◉` Monitor), la descrizione, da quanto gira, la riga di comando e le sue ultime tre righe di output, aggiornate ogni due secondi finché il pannello resta aperto: per un server di sviluppo si vede subito se è partito o se è caduto. Sotto `FINITI`: una riga per lavoro, con `✓`, `✗` se è fallito o `■` se è stato fermato, e da quanto. I finiti restano per dieci minuti.
+Un clic sul `◷ 3` della barra, o `/lavori`, apre un pannello con i lavori in background della sessione, in due sezioni. In alto `IN CORSO`: ogni lavoro in una cornice, con l'icona del tipo (`$` comando, `◆` subagent, `⚙` workflow, `◉` Monitor), la descrizione, da quanto gira, la riga di comando e le sue ultime tre righe di output, aggiornate ogni due secondi finché il pannello resta aperto: per un server di sviluppo si vede subito se è partito o se è caduto. Sotto `FINITI`: una riga per lavoro, con `✓` verde, `✗ … · fallito` o `■ … · fermato`, e da quanto, con i pulsanti allineati a destra; un `✓` grigio è un lavoro sparito senza che si sappia come è finito. I finiti restano per dieci minuti.
 
-I pulsanti, in azzurro:
+Un comando avviato da un subagent ha sotto il titolo `↳ da ◆ <subagent>`, il subagent che l'ha lanciato. Il watch che Claude Code apre da sé su un artifact pubblicato (`live updates for artifact …`) non è un lavoro: non compare né nel pannello né nel conto.
 
-- `▾ output` apre l'output intero (le ultime 40 righe) dentro il pannello, `▴ output` lo richiude; c'è anche sui lavori finiti, finché il file esiste.
+I pulsanti:
+
+- `▾ output` apre l'output intero (le ultime 40 righe) dentro il pannello; aperto, il pulsante diventa `▴ chiudi output` a colori invertiti e lo richiude, come la `✕` in alto a destra nel riquadro; c'è anche sui lavori finiti, finché il file esiste.
 - `↗ apri` apre il file dell'output nell'editor (quello dell'opzione `editor`), sull'ultima riga. L'opzione `apriOutput` ("Apri output con" in `/config`) lo cambia: `notepad++` lo apre in Notepad++ con il monitoraggio del file acceso, che segue le righe nuove come `tail -f`; un comando tuo, con `{file}` e `{riga}` al posto del percorso e dell'ultima riga (senza `{file}` il percorso va in fondo), apre con qualunque altro programma.
 - `■ ferma`, in rosso, solo sui lavori in corso: al primo clic diventa `■ ferma? clicca di nuovo` (la richiesta scade dopo qualche secondo), al secondo lo ferma come farebbe Claude con TaskStop. Claude riceve la notifica e ne tiene conto.
 

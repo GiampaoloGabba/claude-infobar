@@ -88,9 +88,9 @@ export function coloreModello(nome: string): string {
   return 'cyan'
 }
 
-const COLORI_EFFORT: Record<string, string> = { low: 'green', medium: 'cyan', high: 'yellow', xhigh: '#ff8700', max: 'red' }
+const COLORI_EFFORT: Record<string, string> = { low: 'success', medium: 'suggestion', high: 'warning', xhigh: 'claude', max: 'error' }
 
-export const coloreEffort = (livello: string) => COLORI_EFFORT[livello] ?? 'gray'
+export const coloreEffort = (livello: string) => COLORI_EFFORT[livello] ?? 'inactive'
 
 export const LIVELLI_EFFORT = Object.keys(COLORI_EFFORT)
 
@@ -182,7 +182,7 @@ export function descriviLimite(f: { kind: string; percentUsed: number; resetsAt?
   }
 }
 
-export const coloreLivello = (p: number) => (p >= 80 ? 'red' : p >= 50 ? 'yellow' : 'green')
+export const coloreLivello = (p: number) => (p >= 80 ? 'error' : p >= 50 ? 'warning' : 'success')
 
 /**
  * Le lunghezze a cui accorciare due testi perché insieme stiano in `totale`: si toglie dal più lungo, e

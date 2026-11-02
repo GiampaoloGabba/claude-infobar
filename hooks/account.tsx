@@ -179,17 +179,17 @@ export async function disegnaConti($: EngineInterface, e: RenderInput<'Pane'>) {
         key={`conto-${c.numero}`}
         flexDirection="column"
         borderStyle="round"
-        borderColor={qui ? 'green' : undefined}
+        borderColor={qui ? 'success' : undefined}
         borderDimColor={!qui}
         paddingX={1}
       >
         <Box flexDirection="row" justifyContent="space-between">
-          <Text bold={qui} color={qui ? 'green' : undefined}>{`${qui ? '●' : '○'} ${c.nome}`}</Text>
+          <Text bold={qui} color={qui ? 'success' : undefined}>{`${qui ? '●' : '○'} ${c.nome}`}</Text>
           {qui ? (
-            <Text bold color="black" backgroundColor="green">{` ${etichettaEvidenza(sessione).toUpperCase()} `}</Text>
+            <Text bold color="inverseText" backgroundColor="success">{` ${etichettaEvidenza(sessione).toUpperCase()} `}</Text>
           ) : sessione?.fisso ? null : (
             <Button key={`switch-${c.numero}`} plain onPress={() => void passaA($, String(c.numero))}>
-              <Text color="cyan">⇄ switch</Text>
+              <Text color="suggestion">⇄ switch</Text>
             </Button>
           )}
         </Box>
@@ -200,8 +200,8 @@ export async function disegnaConti($: EngineInterface, e: RenderInput<'Pane'>) {
           </Box>
         ) : (
           <Text>
-            <Text color="yellow">{'⚠ '}</Text>
-            <Text color="yellow">{STATO_CONTO[c.stato] ?? c.stato}</Text>
+            <Text color="warning">{'⚠ '}</Text>
+            <Text color="warning">{STATO_CONTO[c.stato] ?? c.stato}</Text>
           </Text>
         )}
       </Box>
@@ -212,13 +212,13 @@ export async function disegnaConti($: EngineInterface, e: RenderInput<'Pane'>) {
     <Box flexDirection="column">
       {/* Una riga di distacco: senza, "aggiorna" sta subito sotto la × di chiusura del pannello. */}
       <Box flexDirection="row" justifyContent="space-between" marginTop={1}>
-        <Text bold color="cyan">{`ACCOUNT · ${s.conti.length}`}</Text>
+        <Text bold color="suggestion">{`ACCOUNT · ${s.conti.length}`}</Text>
         <Box flexDirection="row" columnGap={2}>
-          <Text dimColor={!s.occupato} color={s.occupato ? 'yellow' : undefined}>
+          <Text dimColor={!s.occupato} color={s.occupato ? 'warning' : undefined}>
             {testoAggiornamento(s)}
           </Text>
           <Button key="aggiorna-conti" plain onPress={() => void aggiornaConti($)}>
-            <Text color="cyan">↻ aggiorna</Text>
+            <Text color="suggestion">↻ aggiorna</Text>
           </Button>
         </Box>
       </Box>
@@ -228,7 +228,7 @@ export async function disegnaConti($: EngineInterface, e: RenderInput<'Pane'>) {
       {s.conti.map(riquadro)}
       {s.errore ? (
         <Box marginTop={1}>
-          <Text color="red">{`Errore: ${s.errore}`}</Text>
+          <Text color="error">{`Errore: ${s.errore}`}</Text>
         </Box>
       ) : null}
     </Box>
@@ -252,7 +252,7 @@ export async function pulsanteConto($: EngineInterface, e: RenderInput) {
   const { Text, Button } = $.ui.resolve(e)
   return (
     <Button key="conto" plain onPress={() => void alterna($, PANNELLO_CONTI, () => apriConti($))}>
-      <Text bold color={sessione.fisso ? 'magenta' : 'green'}>{nomeConto(sessione.nome)}</Text>
+      <Text bold color={sessione.fisso ? 'merged' : 'success'}>{nomeConto(sessione.nome)}</Text>
       <Text dimColor>{sessione.fisso ? ' ⚑' : ' ▾'}</Text>
     </Button>
   )
