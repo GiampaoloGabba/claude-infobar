@@ -134,7 +134,7 @@ I pulsanti, in azzurro:
 
 Un lavoro che Claude ferma da sé (TaskStop) esce subito dal conto. Uno fermato dall'interfaccia di Claude Code esce al riepilogo di fine turno, perché la mod non ne riceve notizia prima.
 
-Il pannello rilegge un file di output solo quando cambia. Oltre i 4 MB (il massimo che una mod può leggere) le ultime righe non si possono mostrare e il pannello lo dice: la fine si vede con `↗ apri`.
+Il pannello rilegge un file di output solo quando cambia. Oltre i 4 MB, il massimo che una mod può leggere, al posto delle ultime righe compare la dimensione: il file si guarda con `↗ apri`.
 
 La durata parte da quando la mod ha visto il lavoro: per un comando lanciato in background è la partenza; per un workflow o un Monitor, che compaiono solo nel riepilogo di fine turno, può essere un po' dopo.
 

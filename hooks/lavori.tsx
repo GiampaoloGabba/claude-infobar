@@ -200,8 +200,8 @@ async function leggiOutput($: EngineInterface): Promise<string | null> {
       return null
     })
     if (!letto) continue
-    // Oltre i 4 MB $.fs.read dà solo l'inizio del file: le "ultime righe" sarebbero sbagliate.
-    const troppo = letto.dimensione > MAX_LETTURA ? [`(output di ${Math.round(letto.dimensione / 1048576)} MB: la fine si vede con ↗ apri)`] : null
+    // Oltre i 4 MB una mod non può leggere il file: niente righe, ma i pulsanti per aprirlo restano.
+    const troppo = letto.dimensione > MAX_LETTURA ? [`${Math.round(letto.dimensione / 1048576)} MB, troppo grande da mostrare: ↗ apri`] : null
     output[l.id] = {
       file,
       coda: inCorso(l) ? (troppo ?? coda(letto.testo)) : [],
@@ -256,7 +256,8 @@ export type OpzioniLavori = { editor?: string; apriOutput?: string }
 
 async function apriOutput($: EngineInterface, file: string, opzioni: OpzioniLavori) {
   const letto = await leggiSeCambiato($, file).catch(() => null)
-  const riga = Math.max(1, (letto?.testo ?? '').split('\n').length)
+  // Di un file troppo grande per leggerlo le righe non si contano: una riga oltre la fine porta l'editor in fondo.
+  const riga = letto && letto.dimensione > MAX_LETTURA ? 99_999_999 : Math.max(1, (letto?.testo ?? '').split('\n').length)
   const windows = (await $.env.get('OS')) === 'Windows_NT'
   const proprio = comandoOutput(opzioni.apriOutput, file, riga, windows)
   if (proprio) {

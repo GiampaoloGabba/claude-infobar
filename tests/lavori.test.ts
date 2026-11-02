@@ -302,3 +302,22 @@ test("l'output si apre con l'editor, con Notepad++ in monitoraggio o con un coma
   expect(comandoOutput('subl', file, 9, true)).toEqual([...shell, 'subl', nativo])
   expect(comandoOutput('less +{riga} {file}', '/tmp/b1.output', 9, false)).toEqual(['less', '+9', '/tmp/b1.output'])
 })
+
+test('un output oltre i 4 MB non si legge, ma il lavoro tiene i pulsanti e una riga corta', async ($, on) => {
+  mock.clock(on)
+  const o = ospite(on)
+  const file = `${CARTELLA}/b1.output`
+  o.file[file] = 'x'.repeat(5 * 1024 * 1024)
+  await $.classic.Stop({
+    stop_hook_active: false,
+    background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'build', command: 'pnpm build' }],
+  } as never)
+  await $.command.run({ command: 'lavori', args: '' } as never)
+
+  const ui = await $.ui.mount(PANNELLO)
+  expect(o.letture[file] ?? 0).toBe(0)
+  expect(await ui.find({ type: 'Text', text: /5 MB, troppo grande da mostrare/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'output-b1' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'apri-b1' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Output non letto/ })).toBeUndefined()
+})
