@@ -34,6 +34,8 @@ La prima riga ha modello, effort, cartella e branch git (anche dentro un worktre
 
 La barra compare solo nel terminale: nell'app desktop non viene disegnata, mentre i comandi continuano a funzionare.
 
+Quando una riga intera non ci sta, si compatta un passo alla volta, solo quanto serve. La prima perde i `|`, poi scrive l'effort in due lettere (`lw` `md` `hi` `xh` `mx`, con lo stesso colore) e poi accorcia dal mezzo cartella e branch (non sotto gli 8 caratteri). La seconda perde la barra del contesto (resta la percentuale) e poi i `|`; senza separatori l'etichetta `codex` diventa bianca, così si vede dove cominciano i suoi limiti. Se non basta ancora, va a capo un pezzo intero alla volta, mai una parola a metà.
+
 In fondo alla seconda riga ci sono i limiti di utilizzo dell'abbonamento: la finestra di 5 ore, quella settimanale ed eventuali limiti settimanali per modello, ognuno con la percentuale usata e, in grigio, il tempo che manca al reset. La percentuale è la quota del limite già consumata e usa gli stessi colori del contesto: verde sotto il 50%, gialla fino all'80%, rossa oltre. Con una sola finestra (i piani senza limite di 5 ore) l'etichetta `7d` non compare: restano percentuale e reset. Senza abbonamento (chiave API) questa parte non compare.
 
 La seconda riga parte dal contesto: token usati, percentuale della finestra e una barra che diventa gialla oltre il 50% e rossa oltre l'80%. Si aggiorna dopo ogni strumento che Claude usa, quindi la vedi salire anche durante un turno lungo. Al 70% e all'85% arriva un avviso.
@@ -50,6 +52,7 @@ In fondo compaiono le autorizzazioni attive e, se c'è, l'orario della ripresa a
 | `/revoca <n\|tutte>` | Toglie un'autorizzazione, o tutte. |
 | `/autonomo` | Accende o spegne la modalità autonoma: Claude porta a termine il lavoro concordato senza fermarsi a chiedere conferme. |
 | `/modifiche` | Apre il pannello dei file modificati e non committati nel repository git, con diff. |
+| `/messaggi` | Apre il pannello dei tuoi messaggi: cerca, salta a uno nel transcript, copia messaggio e risposta. Si apre anche con `≡` nella barra. Solo nel terminale. |
 | `/lavori` | Apre il pannello dei lavori in background, con output e `ferma`. |
 | `/ripresa [annulla]` | Mostra la ripresa automatica programmata, o la annulla. |
 | `/account [alias\|numero]` | Apre il pannello degli account di cswap; con un alias o un numero fa lo switch del profilo principale. |
@@ -119,6 +122,12 @@ Le letture di documenti no: Claude rilegge CLAUDE.md e README di continuo e i li
 Sotto `Write` ed `Edit` di un file di codice il link apre l'editor sulla prima riga cambiata: `↗ Rider Program.cs:42`, `↗ VS Code app.ts:7`. L'opzione `editor` (in `/config`) sceglie quale: `auto`, il predefinito, usa l'IDE in cui gira il terminale (quello integrato di Rider o di VS Code); fuori da un IDE Rider per i file .NET (`.cs`, `.razor`, `.csproj`, `.xaml`, ...) e VS Code per il resto, tra quelli installati. `rider`, `code` e `cursor` lo fissano, `no` toglie il link. L'editor va lanciato da riga di comando (`rider`, `code`, `cursor` nel `PATH`: per Rider lo script di JetBrains Toolbox).
 
 Sotto un comando compaiono anche gli URL del suo output, fino a tre: `↗ localhost:5173` dopo l'avvio di un server, `↗ PR #42` dopo un `gh pr create`. Si aprono nel browser predefinito. Gli URL già scritti nel comando non contano, così un `curl` non fa comparire niente, e nemmeno il suggerimento "Create a pull request" che git stampa a ogni push. Niente URL dai comandi che stampano il contenuto di file (`cat`, `grep`, `rg`, `sed`, `head`, `tail`, `Get-Content`, `Select-String`, `git diff`, `git log`, `git show`, ...): sono indirizzi scritti nel codice o nei log, non creati dal comando. Basta uno di questi in un comando composto (`cd x && grep ...`); in una pipe conta il primo programma, così `git push | tail -2` vale come `git push`. Sotto un gruppo di comandi lo stesso indirizzo compare una volta sola, e un indirizzo che è solo l'inizio del percorso di un altro sparisce: accanto a `github.com/utente/repo` non c'è anche `github.com/utente`. La radice di un server (`localhost:5173`) resta comunque. Un comando lanciato in background, come un server di sviluppo, stampa l'indirizzo dopo: la mod guarda il suo file di output per due minuti e il link compare appena arriva.
+
+## Messaggi
+
+Il pannello `Messaggi` (`/messaggi`, o `≡ 12`, l'ultima voce della seconda riga della barra, con il numero dei messaggi) elenca i tuoi messaggi della sessione, il più recente in cima, con numero, ora d'invio e prima riga. Un clic porta il transcript a quel messaggio, in cima allo schermo, e il messaggio si accende per un attimo, così si trova anche se era già a video. Il campo in alto, che prende la tastiera appena il pannello si apre, filtra mentre scrivi: tutte le parole, maiuscole o no; `#12` cerca per numero, `Invio` salta al primo trovato. Con il puntatore su un messaggio compaiono, in fondo alla sua riga, `⧉ testo`, che lo copia, e `⧉ risposta`, che copia l'ultimo blocco della risposta di Claude. Solo nel terminale: nell'app desktop il pannello e il comando non ci sono. Le notifiche dei lavori in background e i messaggi di altri agenti non ci sono.
+
+La mod raccoglie i messaggi man mano che il terminale li disegna: in una sessione ripresa compaiono quelli già mostrati, e l'ora c'è solo per quelli inviati in questa sessione.
 
 ## Copia
 

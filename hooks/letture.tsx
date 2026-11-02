@@ -7,6 +7,7 @@ import { type Size, fitCells, pngSize } from './layout'
 import { lavoroAvviato } from './lavori'
 import { leggiSeCambiato } from './file'
 import { EXTENSIONS, type Format, decodeImage, formatOf } from './formati'
+import { accorcia } from './testi'
 import { fromBase64, rasterCells, toBase64 } from './raster'
 import { fileOutputLavoro, fileOutputNelTesto, ricordaFileOutput } from './sessione'
 import { apriUrl, etichettaUrl, stampaFile, urlDaTenere, urlNelTesto } from './url'
@@ -178,17 +179,6 @@ function decodificaInSeguito($: EngineInterface) {
 const MAX_NOME = 40
 const MIN_NOME = 16
 
-/** Un nome di file accorciato a `max` caratteri togliendo dal mezzo: restano l'inizio, la coda e l'estensione. */
-export function accorcia(nome: string, max: number): string {
-  if (nome.length <= max) return nome
-  const punto = nome.lastIndexOf('.')
-  const estensione = punto > 0 && nome.length - punto <= 6 ? nome.slice(punto) : ''
-  const radice = nome.slice(0, nome.length - estensione.length)
-  const spazio = Math.max(2, max - estensione.length - 1)
-  // La coda conta: tra due screenshot cambiano le ultime cifre dell'ora, non il prefisso.
-  const coda = Math.floor(spazio / 3)
-  return `${radice.slice(0, spazio - coda)}…${radice.slice(radice.length - coda)}${estensione}`
-}
 
 function nomeFile(path: string | null): string {
   return path?.split(/[\\/]/).pop() || 'immagine'

@@ -12,10 +12,12 @@ import {
   loginProprio,
   pannelloAperto,
   passaA,
+  larghezzaConto,
   pulsanteConto,
 } from './account'
 import { apri } from './apri'
 import { PANNELLO_LAVORI, apriLavori, attivitaInCorso, disegnaLavori, lavoriDaAgenti, lavoriDaRiepilogo, lavoriInCorso, lavoroDaNotifica, lavoroFermato } from './lavori'
+import { apriMessaggi, messaggioInviato, nuovaSessioneMessaggi, quantiMessaggi, registraMessaggi } from './messaggi'
 import { PANNELLO_MODIFICHE, apriModifiche, disegnaModifiche, fileModificati, forseModificati } from './modifiche'
 import { cartellaSessione } from './sessione'
 import { aggiornaCodex, codexDaMostrare } from './codex-uso'
@@ -28,6 +30,9 @@ import {
   AUTONOMO,
   ISTRUZIONI_COMPATTAZIONE,
   LIVELLI_EFFORT,
+  accorcia,
+  accorciaCoppia,
+  siglaEffort,
   barra,
   coloreEffort,
   coloreLivello,
@@ -208,6 +213,7 @@ async function annullaRipresa($: EngineInterface) {
 }
 
 // Il riquadro più grande è 32 x 6 celle: a 10 x 20 pixel per cella (Windows Terminal via Sixel) fanno 320 x 120.
+const MARGINE_BARRA = 3
 const MINIATURA_IMMAGINI = { width: 320, height: 120 }
 // A mezzi blocchi lo stesso riquadro vale 32 x 12 pixel: 64 lascia margine per la media.
 const MINIATURA_BLOCCHI = { width: 64, height: 64 }
@@ -471,13 +477,18 @@ export const register: Register = (on, options) => {
     editor: typeof options.editor === 'string' ? options.editor : undefined,
     miniatureLette: options.miniatureLette === 'si',
   })
+  registraMessaggi(on)
   if (options.copia !== 'no') registraCopia(on, options.copia === 'hover' ? 'hover' : 'sempre')
 
   on('session.start', async ($, e, next) => {
+    await nuovaSessioneMessaggi($)
     await $.command.register({ name: 'autorizza', description: 'Aggiunge un\'autorizzazione di sessione (alias: db, prod, deploy, commit, push)', argumentHint: '[testo|alias]' })
     await $.command.register({ name: 'revoca', description: 'Revoca un\'autorizzazione di sessione', argumentHint: '<n|tutte>' })
     await $.command.register({ name: 'autonomo', description: 'Attiva o disattiva la modalità autonoma di sessione' })
     await $.command.register({ name: 'modifiche', description: 'Apre il pannello dei file modificati e non committati nel repository git, con diff', immediate: true })
+    // Il pannello lavora sul transcript del terminale: l'app desktop non lo vede.
+    if ((await $.session.surfaces()).includes('terminal'))
+      await $.command.register({ name: 'messaggi', description: 'Apre il pannello dei tuoi messaggi: cerca e salta a uno nel transcript', immediate: true })
     await $.command.register({ name: 'lavori', description: 'Apre il pannello dei lavori in background: comandi, subagent, workflow, con output e stop', immediate: true })
     await $.command.register({ name: 'ripresa', description: 'Stato della ripresa automatica dopo un limite', argumentHint: '[annulla]', immediate: true })
     // Dove la sessione ha un login suo (app desktop) la barra non c'è e cswap non la riguarda: niente timer.
@@ -564,6 +575,7 @@ export const register: Register = (on, options) => {
     if (e.origin.kind === 'task-notification') await lavoroDaNotifica($, e.text)
     const daPersona = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
     if (daPersona) forseModificati($)
+    if (daPersona) await messaggioInviato($, e.text)
     if (daPersona) {
       if (await read($, ripresa)) await annullaRipresa($)
       await aggiornaBranch($)
@@ -720,6 +732,11 @@ export const register: Register = (on, options) => {
     return { text: 'Pannello dei file modificati aperto.' }
   })
 
+  on('command.run', { command: 'messaggi' }, async $ => {
+    await apriMessaggi($)
+    return { text: 'Pannello dei messaggi aperto.' }
+  })
+
   on('command.run', { command: 'lavori' }, async $ => {
     await apriLavori($)
     return { text: 'Pannello dei lavori aperto.' }
@@ -741,6 +758,7 @@ export const register: Register = (on, options) => {
     const t = await read($, tokens)
     const occupati = await lavoriInCorso($)
     const modificati = await fileModificati($)
+    const numeroMessaggi = await quantiMessaggi($)
     const turno = await read($, turnoAttivo)
     const r = await read($, ripresa)
     const lista = await read($, autorizzazioni)
@@ -755,71 +773,176 @@ export const register: Register = (on, options) => {
     const conto = conAccount ? await pulsanteConto($, e) : null
     const codex = conCodex ? await codexDaMostrare($, ora) : null
 
+    // Ogni riga si compatta solo quando intera non ci sta, un passo alla volta: la prima perde i `|`, poi
+    // scrive l'effort in due lettere, poi accorcia cartella e branch dal mezzo; la seconda perde la barra del contesto (resta la percentuale), poi i `|`.
+    // Lo spazio vero è bodyColumns (il terminale meno le cinque colonne del [-]); qualche colonna di margine
+    // perché alcuni simboli (◐ ✓ ✎) un terminale li disegna larghi due.
+    const colonne = (e.props.bodyColumns || Infinity) - MARGINE_BARRA
+    const largConto = conto ? await larghezzaConto($) : 0
+    const riga1 = (sep: string, eff: string | null, d: string | null, b: string | null) =>
+      largConto +
+      (nome ? (conto ? sep.length : 0) + nome.length + (eff ? 1 + eff.length : 0) : 0) +
+      (d ? sep.length + d.length + (b ? 3 + b.length : 0) : 0) +
+      (modificati ? 4 + String(modificati).length : 0)
+    let sep1 = ' | '
+    let effortMostrato = livello
+    let dirMostrata = dir
+    let ramoMostrato = ramo
+    if (riga1(sep1, livello, dir, ramo) > colonne) {
+      sep1 = ' '
+      if (livello && riga1(sep1, livello, dir, ramo) > colonne) effortMostrato = siglaEffort(livello)
+      const eccesso = riga1(sep1, effortMostrato, dir, ramo) - colonne
+      if (eccesso > 0 && dir) {
+        const [ld, lr] = accorciaCoppia(dir.length, ramo?.length ?? 0, dir.length + (ramo?.length ?? 0) - eccesso)
+        dirMostrata = accorcia(dir, ld)
+        ramoMostrato = ramo ? accorcia(ramo, lr) : ramo
+      }
+    }
+    const limiteTesto = (f: (typeof finestre)[number], multi: boolean, sep: string) => {
+      const l = descriviLimite(f, ora)
+      return `${multi ? `${sep}${l.etichetta} ` : sep}${l.percentuale}%${l.mancano ? ` ${l.mancano}` : ''}`
+    }
+    const riga2 = (sep: string, conBarra: boolean) =>
+      [
+        '◐ ',
+        t === null ? '' : `${formattaToken(t)} `,
+        p === null ? '-' : `${p}%`,
+        conBarra && p !== null ? ` ${barra(p)}` : '',
+        ' ',
+        occupati ? `◷ ${occupati}` : '✓',
+        autorizz ? `${sep}${autorizz}` : '',
+        r ? `${sep}ripresa ${orario(r.at)} annulla` : '',
+        ...finestre.map(f => limiteTesto(f, finestre.length > 1, sep)),
+        codex
+          ? `${sep}codex${codex.limiti.map(f => {
+              const l = descriviLimite(f, ora)
+              return `${codex.limiti.length > 1 ? ` ${l.etichetta}` : ''} ${l.percentuale}%${l.mancano ? ` ${l.mancano}` : ''}`
+            }).join('')}${codex.vistoAlle !== null ? ` · ${formattaDurata(ora - codex.vistoAlle)} fa` : ''}`
+          : '',
+        vistiAlle !== null && finestre.length ? ` · ${formattaDurata(ora - vistiAlle)} fa` : '',
+        `${sep}≡${numeroMessaggi || ''}`,
+      ].join('').length
+    const conBarra = riga2(' | ', true) <= colonne
+    const sep = conBarra || riga2(' | ', false) <= colonne ? ' | ' : ' '
+    const compatta = sep === ' '
+
     return (
       <Box flexDirection="column">
         {miniature}
         {sotto}
-        <Box flexDirection="row">
-          {conto}
-          {conto && nome ? <Text dimColor>{' | '}</Text> : null}
-          {nome ? <Text bold color={coloreModello(nome)}>{nome}</Text> : null}
-          {livello ? <Text color={coloreEffort(livello)}>{` ${livello}`}</Text> : null}
-          {dir ? <Text dimColor>{' | '}</Text> : null}
-          {dir ? <Text bold color="yellow">{dir}</Text> : null}
-          {ramo ? <Text color="cyan">{` (${ramo})`}</Text> : null}
-          {modificati ? (
-            <Button key="modifiche" plain onPress={() => void apriModifiche($)}>
-              <Text color="yellow">{` ✎ ${modificati}`}</Text>
-            </Button>
+        {/* Ogni pezzo resta intero: in un terminale stretto va a capo il pezzo, non le parole al suo interno. */}
+        <Box flexDirection="row" flexWrap="wrap">
+          {conto ? <Box key="conto" flexShrink={0}>{conto}</Box> : null}
+          {nome ? (
+            <Box key="modello" flexShrink={0}>
+              <Text>
+                {conto ? <Text dimColor>{sep1}</Text> : null}
+                <Text bold color={coloreModello(nome)}>{nome}</Text>
+                {livello ? <Text color={coloreEffort(livello)}>{` ${effortMostrato}`}</Text> : null}
+              </Text>
+            </Box>
+          ) : null}
+          {dir ? (
+            // ✎ va a capo insieme a cartella e branch: i file modificati sono di quel repository.
+            <Box key="cartella" flexShrink={0} flexDirection="row">
+              <Text>
+                <Text dimColor>{sep1}</Text>
+                <Text bold color="yellow">{dirMostrata}</Text>
+                {ramo ? <Text color="cyan">{` (${ramoMostrato})`}</Text> : null}
+              </Text>
+              {modificati ? (
+                <Button key="modifiche" plain onPress={() => void apriModifiche($)}>
+                  <Text color="yellow">{` ✎ ${modificati}`}</Text>
+                </Button>
+              ) : null}
+            </Box>
+          ) : modificati ? (
+            <Box key="modifiche" flexShrink={0}>
+              <Button key="modifiche" plain onPress={() => void apriModifiche($)}>
+                <Text color="yellow">{` ✎ ${modificati}`}</Text>
+              </Button>
+            </Box>
           ) : null}
         </Box>
-        <Box flexDirection="row">
-          <Text color={colore}>{'◐ '}</Text>
-          {t === null ? null : <Text bold>{`${formattaToken(t)} `}</Text>}
-          <Text color={colore}>{p === null ? '-' : `${p}%`}</Text>
-          {p === null ? null : <Text color={colore}>{` ${barra(p)}`}</Text>}
-          <Text>{' '}</Text>
-          {occupati ? (
-            <Button key="lavori" plain onPress={() => void apriLavori($)}>
-              <Text color="yellow">{`◷ ${occupati}`}</Text>
-            </Button>
-          ) : turno ? (
-            <Text dimColor>…</Text>
-          ) : (
-            <Text dimColor>✓</Text>
-          )}
-          {autorizz ? <Text dimColor>{' | '}</Text> : null}
-          {autorizz ? <Text color="cyan">{autorizz}</Text> : null}
-          {r ? <Text dimColor>{' | '}</Text> : null}
-          {r ? <Text color="magenta">{`ripresa ${orario(r.at)} `}</Text> : null}
-          {r ? <Button key="annulla-ripresa" label="annulla" plain onPress={() => annullaRipresa($)} /> : null}
+        <Box flexDirection="row" flexWrap="wrap">
+          <Box key="contesto" flexShrink={0}>
+            <Text>
+              <Text color={colore}>{'◐ '}</Text>
+              {t === null ? null : <Text bold>{`${formattaToken(t)} `}</Text>}
+              <Text color={colore}>{p === null ? '-' : `${p}%`}</Text>
+              {p === null || !conBarra ? null : <Text color={colore}>{` ${barra(p)}`}</Text>}
+              <Text>{' '}</Text>
+            </Text>
+          </Box>
+          <Box key="turno" flexShrink={0}>
+            {occupati ? (
+              <Button key="lavori" plain onPress={() => void apriLavori($)}>
+                <Text color="yellow">{`◷ ${occupati}`}</Text>
+              </Button>
+            ) : turno ? (
+              <Text dimColor>…</Text>
+            ) : (
+              <Text dimColor>✓</Text>
+            )}
+          </Box>
+          {autorizz ? (
+            <Box key="autorizzazioni" flexShrink={0}>
+              <Text>
+                <Text dimColor>{sep}</Text>
+                <Text color="cyan">{autorizz}</Text>
+              </Text>
+            </Box>
+          ) : null}
+          {r ? (
+            <Box key="ripresa" flexShrink={0}>
+              <Text>
+                <Text dimColor>{sep}</Text>
+                <Text color="magenta">{`ripresa ${orario(r.at)} `}</Text>
+              </Text>
+              <Button key="annulla-ripresa" label="annulla" plain onPress={() => annullaRipresa($)} />
+            </Box>
+          ) : null}
           {finestre.map(f => {
             const l = descriviLimite(f, ora)
             return (
-              <Text key={f.kind}>
-                <Text dimColor>{finestre.length > 1 ? ` | ${l.etichetta} ` : ' | '}</Text>
-                <Text color={l.colore}>{`${l.percentuale}%`}</Text>
-                {l.mancano ? <Text dimColor>{` ${l.mancano}`}</Text> : null}
-              </Text>
+              <Box key={`limite-${f.kind}`} flexShrink={0}>
+                <Text key={f.kind}>
+                  <Text dimColor>{finestre.length > 1 ? `${sep}${l.etichetta} ` : sep}</Text>
+                  <Text color={l.colore}>{`${l.percentuale}%`}</Text>
+                  {l.mancano ? <Text dimColor>{` ${l.mancano}`}</Text> : null}
+                </Text>
+              </Box>
             )
           })}
           {codex ? (
-            <Text key="codex">
-              <Text dimColor>{' | codex'}</Text>
-              {codex.limiti.map(f => {
-                const l = descriviLimite(f, ora)
-                return (
-                  <Text key={`codex-${f.kind}`}>
-                    {codex.limiti.length > 1 ? <Text dimColor>{` ${l.etichetta}`}</Text> : null}
-                    <Text color={l.colore}>{` ${l.percentuale}%`}</Text>
-                    {l.mancano ? <Text dimColor>{` ${l.mancano}`}</Text> : null}
-                  </Text>
-                )
-              })}
-              {codex.vistoAlle !== null ? <Text dimColor>{` · ${formattaDurata(ora - codex.vistoAlle)} fa`}</Text> : null}
-            </Text>
+            <Box key="codex" flexShrink={0}>
+              <Text key="codex">
+                <Text dimColor={!compatta}>{`${sep}codex`}</Text>
+                {codex.limiti.map(f => {
+                  const l = descriviLimite(f, ora)
+                  return (
+                    <Text key={`codex-${f.kind}`}>
+                      {codex.limiti.length > 1 ? <Text dimColor>{` ${l.etichetta}`}</Text> : null}
+                      <Text color={l.colore}>{` ${l.percentuale}%`}</Text>
+                      {l.mancano ? <Text dimColor>{` ${l.mancano}`}</Text> : null}
+                    </Text>
+                  )
+                })}
+                {codex.vistoAlle !== null ? <Text dimColor>{` · ${formattaDurata(ora - codex.vistoAlle)} fa`}</Text> : null}
+              </Text>
+            </Box>
           ) : null}
-          {vistiAlle !== null && finestre.length ? <Text dimColor>{` · ${formattaDurata(ora - vistiAlle)} fa`}</Text> : null}
+          {vistiAlle !== null && finestre.length ? (
+            <Box key="visti" flexShrink={0}>
+              <Text dimColor>{` · ${formattaDurata(ora - vistiAlle)} fa`}</Text>
+            </Box>
+          ) : null}
+          <Box key="messaggi" flexShrink={0}>
+            <Text dimColor>{sep}</Text>
+            <Button key="messaggi" plain onPress={() => void apriMessaggi($)}>
+              <Text color="cyan">{numeroMessaggi ? `≡${numeroMessaggi}` : '≡'}</Text>
+            </Button>
+          </Box>
         </Box>
       </Box>
     )

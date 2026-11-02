@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { descriviLimite, effortDaImpostazioni, formattaDurata, limitiSalvati, gitdirDaFile, nomeCartella, nomeModello, orario, ramoDaHead } from '../hooks/testi'
+import { accorciaCoppia, siglaEffort, descriviLimite, effortDaImpostazioni, formattaDurata, limitiSalvati, gitdirDaFile, nomeCartella, nomeModello, orario, ramoDaHead } from '../hooks/testi'
 
 const cmd = (command: string, args = '') => ({ command, args, origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 120 } })
 
@@ -104,6 +104,26 @@ test('dopo una compattazione la barra si rilegge e mostra il contesto rimasto', 
   expect(await ui.find({ type: 'Text', text: /high/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /12%/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('quando la seconda riga non ci sta, la barra del contesto sparisce e resta la percentuale', async ($, on) => {
+  mock.clock(on)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: [''] }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  const riassunto = { role: 'user' as const, text: 'riassunto', toolUses: [] }
+  on('session.compact', () => ({ messages: [riassunto], tokensBefore: 800_000, tokensAfter: 120_000 }))
+  on('classic.SessionStart', () => ({}))
+  on('env.get', () => ({ value: undefined }))
+  on('fs.read', () => ({ value: '' }))
+  await $.session.compact({ trigger: 'manual', messages: [riassunto] })
+  await $.classic.SessionStart({ source: 'compact' })
+
+  for (const [columns, conBarra] of [[20, false], [40, true]] as const) {
+    const ui = await $.ui.mount({ plugin: 'infobar', surface: 'terminal', component: 'AbovePrompt', viewport: { columns, rows: 40 }, props: { hasSurvey: false, bodyColumns: columns } as never })
+    expect(await ui.find({ type: 'Text', text: '12%' })).toBeDefined()
+    expect((await ui.find({ type: 'Text', text: /░/ })) !== undefined).toBe(conBarra)
+    await ui.unmount()
+  }
 })
 
 test('intestazione: nome del modello, branch e worktree', () => {
@@ -250,4 +270,15 @@ test('dopo /compact il contesto non torna al valore di prima', async ($, on) => 
   const ui = await $.ui.mount({ plugin: 'infobar', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, bodyColumns: 120 } as never })
   expect(await ui.find({ type: 'Text', text: /^10%$/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('cartella e branch si accorciano togliendo dal più lungo, senza scendere sotto il minimo', () => {
+  expect(accorciaCoppia(14, 4, 30)).toEqual([14, 4])
+  expect(accorciaCoppia(20, 10, 24)).toEqual([14, 10])
+  expect(accorciaCoppia(20, 20, 30)).toEqual([15, 15])
+  expect(accorciaCoppia(20, 20, 10)).toEqual([8, 8])
+})
+
+test('l\'effort in due lettere, e un livello sconosciuto com\'è', () => {
+  expect(['low', 'medium', 'high', 'xhigh', 'max', 'boh'].map(siglaEffort)).toEqual(['lw', 'md', 'hi', 'xh', 'mx', 'boh'])
 })

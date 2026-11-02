@@ -48,6 +48,9 @@ export type ImmagineIncollata = {
   anteprima?: { tipo: 'pixel'; width: number; height: number; rgba: string } | { tipo: 'file' } | { tipo: 'nota'; testo: string }
 }
 
+/** Un tuo messaggio nel transcript: l'id della sua riga (dove il pannello porta), il testo e l'ora d'invio se nota. */
+export type MessaggioUtente = { id: string; testo: string; ora: number | null; risposta: string | null }
+
 export type FinestraConto = { pct: number; clock: string }
 
 export type Conto = {
@@ -86,6 +89,14 @@ declare module 'claude-code' {
       risposteFinite: string[]
       /** Per chiamata di Bash o PowerShell (il tool_use_id): i documenti scritti e gli URL dell'output. */
       trovatiComandi: StateFamily<{ prodotti: string[]; url: string[] }>
+      /** I tuoi messaggi nel transcript, nell'ordine in cui il terminale li ha mostrati. */
+      messaggi: MessaggioUtente[]
+      /** Il testo cercato nel pannello dei messaggi. */
+      filtroMessaggi: string
+      /** La sessione a cui appartiene l'elenco dei messaggi. */
+      sessioneMessaggi: string | null
+      /** Per riga del transcript: il messaggio a cui il pannello ti ha appena portato, acceso per un attimo. */
+      messaggioEvidenziato: StateFamily<boolean>
       /** Per lettura di immagine (il tool_use_id): la miniatura a blocchi decodificata, 'errore' dove non si è potuto. */
       miniatureLette: StateFamily<{ width: number; height: number; rgba: string } | 'errore' | null>
       statoGit: StatoGit

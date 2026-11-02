@@ -1,7 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On, ToolGroupCall } from 'claude-code'
 
-import { accorcia, daAprire, percorsiNelComando } from '../hooks/letture'
+import { daAprire, percorsiNelComando } from '../hooks/letture'
+import { accorcia } from '../hooks/testi'
 import { fromBase64 } from '../hooks/raster'
 
 // 40 x 20 RGBA, rosso sopra e blu sotto.

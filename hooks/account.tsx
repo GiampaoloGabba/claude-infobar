@@ -3,7 +3,7 @@ import type { EngineInterface, RenderInput } from 'claude-code'
 
 import type { Conto, ContoSessione, FinestraConto, StatoConti } from '../types'
 import { STATO_CONTO, aliasDaSequenza, contiDaCswap, emailDaConfig, profiloFisso } from './conti'
-import { barra, coloreLivello } from './testi'
+import { accorcia, barra, coloreLivello } from './testi'
 
 export const PANNELLO_CONTI = 'account'
 // L'endpoint dei consumi di cswap risponde 429 se interrogato spesso, e ogni sessione aperta ha questo timer.
@@ -234,13 +234,23 @@ export async function disegnaConti($: EngineInterface, e: RenderInput<'Pane'>) {
 }
 
 /** Il pulsante con l'account della sessione; null se non c'è niente da mostrare. */
+// Un profilo può chiamarsi in qualunque modo: nella barra il nome ha un tetto.
+const MAX_NOME_CONTO = 16
+const nomeConto = (nome: string) => accorcia(nome, MAX_NOME_CONTO)
+
+/** Le colonne che occupa il pulsante del conto nella barra: il nome e il segno dopo. */
+export async function larghezzaConto($: EngineInterface): Promise<number> {
+  const sessione = await read($, contoSessione)
+  return sessione ? nomeConto(sessione.nome).length + 2 : 0
+}
+
 export async function pulsanteConto($: EngineInterface, e: RenderInput) {
   const sessione = await read($, contoSessione)
   if (!sessione) return null
   const { Text, Button } = $.ui.resolve(e)
   return (
     <Button key="conto" plain onPress={() => void apriConti($)}>
-      <Text bold color={sessione.fisso ? 'magenta' : 'green'}>{sessione.nome}</Text>
+      <Text bold color={sessione.fisso ? 'magenta' : 'green'}>{nomeConto(sessione.nome)}</Text>
       <Text dimColor>{sessione.fisso ? ' ⚑' : ' ▾'}</Text>
     </Button>
   )

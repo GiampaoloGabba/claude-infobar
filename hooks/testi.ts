@@ -94,6 +94,11 @@ export const coloreEffort = (livello: string) => COLORI_EFFORT[livello] ?? 'gray
 
 export const LIVELLI_EFFORT = Object.keys(COLORI_EFFORT)
 
+const SIGLE_EFFORT: Record<string, string> = { low: 'lw', medium: 'md', high: 'hi', xhigh: 'xh', max: 'mx' }
+
+/** L'effort in due lettere, per la barra compatta; un livello sconosciuto resta com'è. */
+export const siglaEffort = (livello: string) => SIGLE_EFFORT[livello] ?? livello
+
 /** I limiti salvati da una sessione precedente, con le sole finestre non ancora azzerate; null se non ne resta nessuna. */
 export function limitiSalvati(salvati: unknown, ora: number): { at: number; finestre: Limite[] } | null {
   const { at, finestre } = (salvati ?? {}) as { at?: unknown; finestre?: unknown }
@@ -178,3 +183,30 @@ export function descriviLimite(f: { kind: string; percentUsed: number; resetsAt?
 }
 
 export const coloreLivello = (p: number) => (p >= 80 ? 'red' : p >= 50 ? 'yellow' : 'green')
+
+/**
+ * Le lunghezze a cui accorciare due testi perché insieme stiano in `totale`: si toglie dal più lungo, e
+ * nessuno scende sotto `minimo` (o sotto la sua lunghezza, se è già più corto).
+ */
+export function accorciaCoppia(a: number, b: number, totale: number, minimo = 8): [number, number] {
+  let [la, lb] = [a, b]
+  while (la + lb > totale) {
+    if (la >= lb && la > minimo) la--
+    else if (lb > minimo) lb--
+    else if (la > minimo) la--
+    else break
+  }
+  return [la, lb]
+}
+
+/** Un nome accorciato a `max` caratteri togliendo dal mezzo: restano l'inizio, la coda e l'estensione. */
+export function accorcia(nome: string, max: number): string {
+  if (nome.length <= max) return nome
+  const punto = nome.lastIndexOf('.')
+  const estensione = punto > 0 && nome.length - punto <= 6 ? nome.slice(punto) : ''
+  const radice = nome.slice(0, nome.length - estensione.length)
+  const spazio = Math.max(2, max - estensione.length - 1)
+  // La coda conta: tra due screenshot cambiano le ultime cifre dell'ora, non il prefisso.
+  const coda = Math.floor(spazio / 3)
+  return `${radice.slice(0, spazio - coda)}…${radice.slice(radice.length - coda)}${estensione}`
+}
