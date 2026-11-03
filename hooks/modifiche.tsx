@@ -1,11 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, RenderInput, Timer } from 'claude-code'
 
-import type { FileGit, StatoGit } from '../types'
+import type { FileGit, StatoGit, WorktreeGit } from '../types'
 import { apriInEditor, editorPer } from './editor'
-import { diffNuovo, eAnnidato, fileDaStatus, primaRigaDelDiff, righeDaNumstat, soloBlocchi } from './git'
+import { diffNuovo, eAnnidato, fileDaStatus, primaRigaDelDiff, righeDaNumstat, soloBlocchi, worktreeDaLista } from './git'
 import { segnaAperto } from './pannelli'
-import { normalizzaPercorso, paroleRicerca, segna } from './testi'
+import { nomeCartella, normalizzaPercorso, paroleRicerca, segna } from './testi'
 
 export const PANNELLO_MODIFICHE = 'modifiche'
 
@@ -40,11 +40,7 @@ async function git($: EngineInterface, radice: string, argomenti: string[]) {
   return $.process.run(['git', '--no-optional-locks', '-C', radice, ...argomenti], { timeoutMs: 15_000 })
 }
 
-async function leggiStato($: EngineInterface): Promise<StatoGit> {
-  const cwd = await $.session.cwd()
-  const radiceEsito = await $.process.run(['git', '-C', cwd, 'rev-parse', '--show-toplevel'], { timeoutMs: 10_000 }).catch(() => null)
-  if (!radiceEsito || radiceEsito.exitCode !== 0) return null
-  const radice = normalizzaPercorso(radiceEsito.stdout.trim())
+async function leggiFile($: EngineInterface, radice: string): Promise<FileGit[] | null> {
   const status = await git($, radice, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
   if (status.exitCode !== 0) return null
   const file = fileDaStatus(status.stdout).filter(f => !eAnnidato(f))
@@ -60,7 +56,44 @@ async function leggiStato($: EngineInterface): Promise<StatoGit> {
       if (testo !== null) Object.assign(f, { aggiunte: diffNuovo(testo).split('\n').length - 1, tolte: 0 })
     }
   }
-  return { radice, file, aggiornatoAlle: await $.clock.now() }
+  return file
+}
+
+async function leggiStato($: EngineInterface): Promise<StatoGit> {
+  const cwd = await $.session.cwd()
+  const radiceEsito = await $.process.run(['git', '-C', cwd, 'rev-parse', '--show-toplevel'], { timeoutMs: 10_000 }).catch(() => null)
+  if (!radiceEsito || radiceEsito.exitCode !== 0) return null
+  const radice = normalizzaPercorso(radiceEsito.stdout.trim())
+  const file = await leggiFile($, radice)
+  return file && { radice, file, altri: [], aggiornatoAlle: await $.clock.now() }
+}
+
+const stessoPercorso = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+
+// Un agente può lavorare in un worktree accanto (`git worktree add ../repo-x`) mentre la sessione resta qui.
+async function leggiAltri($: EngineInterface, radice: string): Promise<WorktreeGit[]> {
+  const lista = await git($, radice, ['worktree', 'list', '--porcelain'])
+  if (lista.exitCode !== 0) return []
+  const tutti = worktreeDaLista(lista.stdout)
+  const qui = tutti.find(w => stessoPercorso(w.radice, radice))?.head
+  const altri: WorktreeGit[] = []
+  for (const w of tutti) {
+    if (stessoPercorso(w.radice, radice)) continue
+    const file = await leggiFile($, w.radice).catch(() => null)
+    if (!file) continue
+    const conta = qui ? await git($, w.radice, ['rev-list', '--count', `${qui}..${w.head}`]).catch(() => null) : null
+    const commit = conta?.exitCode === 0 ? Number(conta.stdout.trim()) || 0 : 0
+    if (file.length || commit) altri.push({ radice: w.radice, branch: w.branch, file, commit })
+  }
+  return altri
+}
+
+/** Il tree della sessione e gli altri, con il prefisso che distingue i diff aperti di file con lo stesso percorso. */
+function gruppi(stato: NonNullable<StatoGit>) {
+  return [
+    { radice: stato.radice, prefisso: '', file: stato.file },
+    ...stato.altri.map(w => ({ radice: w.radice, prefisso: `${w.radice}::`, file: w.file })),
+  ]
 }
 
 let inLettura = false
@@ -79,7 +112,12 @@ async function aggiorna($: EngineInterface) {
       ancora = false
       const stato = await leggiStato($).catch(() => null)
       const prima = await read($, statoGit)
-      const uguale = JSON.stringify(prima?.file) === JSON.stringify(stato?.file) && prima?.radice === stato?.radice
+      // A pannello chiuso nessuno li guarda, e a ogni tool sarebbero troppi comandi git.
+      if (stato) stato.altri = (await pannelloModificheAperto($).catch(() => false)) ? await leggiAltri($, stato.radice).catch(() => []) : (prima?.altri ?? [])
+      const uguale =
+        JSON.stringify(prima?.file) === JSON.stringify(stato?.file) &&
+        JSON.stringify(prima?.altri) === JSON.stringify(stato?.altri) &&
+        prima?.radice === stato?.radice
       if (!uguale) await update($, statoGit, () => stato)
       for (const k of await read($, diffAperti)) await leggiDiff($, k)
     } while (ancora)
@@ -106,22 +144,23 @@ async function diffDi($: EngineInterface, radice: string, f: FileGit): Promise<s
   return esito?.exitCode === 0 ? soloBlocchi(esito.stdout) : ''
 }
 
-async function leggiDiff($: EngineInterface, path: string) {
+async function leggiDiff($: EngineInterface, chiave: string) {
   const stato = await read($, statoGit)
-  const f = stato?.file.find(x => x.path === path)
-  const diff = stato && f ? await diffDi($, stato.radice, f) : ''
+  const gruppo = stato && gruppi(stato).find(g => g.file.some(f => g.prefisso + f.path === chiave))
+  const f = gruppo?.file.find(x => gruppo.prefisso + x.path === chiave)
+  const diff = gruppo && f ? await diffDi($, gruppo.radice, f) : ''
   const righe = diff.split('\n')
   const testo = righe.length > RIGHE_DIFF ? righe.slice(0, RIGHE_DIFF).join('\n') : diff
-  if ((await read($, testiDiff))[path] !== testo) await update($, testiDiff, t => ({ ...t, [path]: testo }))
+  if ((await read($, testiDiff))[chiave] !== testo) await update($, testiDiff, t => ({ ...t, [chiave]: testo }))
 }
 
-async function mostraDiff($: EngineInterface, path: string) {
-  if ((await read($, diffAperti)).includes(path)) {
-    await update($, diffAperti, a => a.filter(x => x !== path))
+async function mostraDiff($: EngineInterface, chiave: string) {
+  if ((await read($, diffAperti)).includes(chiave)) {
+    await update($, diffAperti, a => a.filter(x => x !== chiave))
     return
   }
-  await leggiDiff($, path)
-  await update($, diffAperti, a => [...a, path])
+  await leggiDiff($, chiave)
+  await update($, diffAperti, a => [...a, chiave])
 }
 
 async function apriFile($: EngineInterface, radice: string, f: FileGit, opzioneEditor: string | undefined) {
@@ -181,7 +220,8 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
 
   const parole = paroleRicerca(filtro)
   const visibili = filtraFile(stato.file, filtro)
-  const conRicerca = stato.file.length >= FILE_PER_RICERCA || parole.length > 0
+  const tutti = gruppi(stato).flatMap(g => g.file)
+  const conRicerca = tutti.length >= FILE_PER_RICERCA || parole.length > 0
   const pezzi = (testo: string, colore?: string, extra: { bold?: boolean; dimColor?: boolean } = {}) =>
     segna(testo, parole).map((p, i) =>
       p.trovato ? (
@@ -190,19 +230,21 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
         <Text key={`t${i}`} color={colore} {...extra}>{p.testo}</Text>
       ),
     )
-  const totale = stato.file.reduce((t, f) => ({ aggiunte: t.aggiunte + (f.aggiunte ?? 0), tolte: t.tolte + (f.tolte ?? 0) }), { aggiunte: 0, tolte: 0 })
+  const totaleDi = (file: readonly FileGit[]) =>
+    file.reduce((t, f) => ({ aggiunte: t.aggiunte + (f.aggiunte ?? 0), tolte: t.tolte + (f.tolte ?? 0) }), { aggiunte: 0, tolte: 0 })
+  const totale = totaleDi(stato.file)
   // I conteggi in colonna: larghi quanto il più largo, così si leggono dall'alto in basso.
   const testoConti = (f: FileGit) => (f.aggiunte === null && f.tolte === null ? '' : `+${f.aggiunte ?? 0} −${f.tolte ?? 0}`)
-  const largConti = Math.max(0, ...stato.file.map(f => testoConti(f).length))
-  const righe = []
-  for (const f of visibili) {
+  const largConti = Math.max(0, ...tutti.map(f => testoConti(f).length))
+  const rigaFile = (f: FileGit, radice: string, prefisso: string) => {
+    const chiave = prefisso + f.path
     const { segno, colore } = SEGNO[f.stato]
     const taglio = f.path.lastIndexOf('/')
     const nome = taglio >= 0 ? f.path.slice(taglio + 1) : f.path
     const cartella = taglio >= 0 ? f.path.slice(0, taglio) : ''
     const conti = testoConti(f)
-    righe.push(
-      <Box key={`file-${f.path}`} flexDirection="column">
+    return (
+      <Box key={`file-${chiave}`} flexDirection="column">
         <Box flexDirection="row">
           {/* Solo il percorso cede quando lo spazio manca: conteggi e pulsanti restano interi. */}
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -224,28 +266,58 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
                 </Text>
               ) : null}
             </Box>
-            <Button key={`diff-${f.path}`} plain onPress={() => mostraDiff($, f.path)}>
-              <Text color="suggestion">{aperti.includes(f.path) ? '▴ diff' : '▾ diff'}</Text>
+            <Button key={`diff-${chiave}`} plain onPress={() => mostraDiff($, chiave)}>
+              <Text color="suggestion">{aperti.includes(chiave) ? '▴ diff' : '▾ diff'}</Text>
             </Button>
             <Box width={6}>
               {f.stato !== 'eliminato' ? (
-                <Button key={`editor-${f.path}`} plain onPress={() => apriFile($, stato.radice, f, opzioneEditor)}>
+                <Button key={`editor-${chiave}`} plain onPress={() => apriFile($, radice, f, opzioneEditor)}>
                   <Text color="suggestion">↗ apri</Text>
                 </Button>
               ) : null}
             </Box>
           </Box>
         </Box>
-        {aperti.includes(f.path) ? (
+        {aperti.includes(chiave) ? (
           <Box borderStyle="single" borderDimColor paddingX={1}>
-            {testi[f.path] ? (
-              <Code source={testi[f.path]!} format="diff" path={f.path} wrap="truncate-end" />
+            {testi[chiave] ? (
+              <Code source={testi[chiave]!} format="diff" path={f.path} wrap="truncate-end" />
             ) : (
               <Text dimColor>nessuna differenza di testo</Text>
             )}
           </Box>
         ) : null}
-      </Box>,
+      </Box>
+    )
+  }
+
+  const altri = stato.altri
+    .map(w => ({ ...w, visibili: filtraFile(w.file, filtro) }))
+    .filter(w => w.visibili.length || !parole.length)
+  const primaChiave = visibili[0]?.path ?? altri.flatMap(w => w.visibili.map(f => `${w.radice}::${f.path}`))[0]
+
+  const sezioneWorktree = (w: (typeof altri)[number]) => {
+    const conti = totaleDi(w.file)
+    return (
+      <Box key={`worktree-${w.radice}`} flexDirection="column" marginTop={1}>
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text wrap="truncate-end">
+            <Text bold color="warning">{w.branch ?? 'HEAD staccata'}</Text>
+            <Text dimColor>{`  ${nomeCartella(w.radice)}`}</Text>
+            {w.file.length ? <Text bold color="warning">{` · ${parole.length ? `${w.visibili.length} di ${w.file.length}` : w.file.length}`}</Text> : null}
+          </Text>
+          {w.file.length ? (
+            <Box flexShrink={0} marginLeft={2}>
+              <Text>
+                <Text color="success">{`+${conti.aggiunte}`}</Text>
+                <Text color="error">{` −${conti.tolte}`}</Text>
+              </Text>
+            </Box>
+          ) : null}
+        </Box>
+        {w.commit ? <Text dimColor>{w.commit === 1 ? '1 commit non nel branch corrente' : `${w.commit} commit non nel branch corrente`}</Text> : null}
+        {w.visibili.map(f => rigaFile(f, w.radice, `${w.radice}::`))}
+      </Box>
     )
   }
 
@@ -272,8 +344,7 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
           onSubmit={async (valore: string) => {
             if (valore.trim()) await update($, filtroModifiche, () => valore)
             await update($, versioneCampo, v => v + 1)
-            const primo = visibili[0]
-            if (primo) await $.ui.focus({ requestId: PANNELLO_MODIFICHE, key: `diff-${primo.path}` }).catch(() => undefined)
+            if (primaChiave) await $.ui.focus({ requestId: PANNELLO_MODIFICHE, key: `diff-${primaChiave}` }).catch(() => undefined)
           }}
         />
       ) : null}
@@ -298,10 +369,11 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
       {!stato.file.length ? (
         <Text dimColor>Nessuna modifica da committare.</Text>
       ) : visibili.length ? (
-        righe
-      ) : (
+        visibili.map(f => rigaFile(f, stato.radice, ''))
+      ) : altri.length ? null : (
         <Text dimColor>Nessun file contiene queste parole nel percorso.</Text>
       )}
+      {altri.map(sezioneWorktree)}
     </Box>
   )
 }

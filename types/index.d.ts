@@ -12,8 +12,18 @@ export type FileGit = {
   da?: string
 }
 
-/** Le modifiche non committate: null fuori da un repository git. */
-export type StatoGit = { radice: string; file: FileGit[]; aggiornatoAlle: number } | null
+/** Un altro worktree dello stesso repository con qualcosa da guardare. */
+export type WorktreeGit = {
+  radice: string
+  /** null con la HEAD staccata. */
+  branch: string | null
+  file: FileGit[]
+  /** I commit del worktree che il branch della sessione non ha. */
+  commit: number
+}
+
+/** Le modifiche non committate: null fuori da un repository git. `altri` si legge solo a pannello aperto. */
+export type StatoGit = { radice: string; file: FileGit[]; altri: WorktreeGit[]; aggiornatoAlle: number } | null
 
 /** Un lavoro in background della sessione: comando, subagent, workflow, Monitor. */
 export type Lavoro = {

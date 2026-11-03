@@ -1,4 +1,5 @@
 import type { FileGit } from '../types'
+import { normalizzaPercorso } from './testi'
 
 /**
  * Un repository dentro il repository (un worktree degli agenti di Claude Code, un clone): git status lo elenca
@@ -34,6 +35,27 @@ function statoDa(x: string, y: string): FileGit['stato'] {
   if (x === 'D' || y === 'D') return 'eliminato'
   if (x === 'R' || x === 'C' || y === 'R' || y === 'C') return 'rinominato'
   return 'modificato'
+}
+
+/** I worktree di `git worktree list --porcelain`, senza quelli la cui cartella non c'è più. */
+export function worktreeDaLista(uscita: string): { radice: string; head: string; branch: string | null }[] {
+  const lista = []
+  for (const blocco of uscita.split(/\r?\n\r?\n/)) {
+    const campi = new Map(
+      blocco.split(/\r?\n/).map(riga => {
+        const spazio = riga.indexOf(' ')
+        return spazio < 0 ? ([riga, ''] as const) : ([riga.slice(0, spazio), riga.slice(spazio + 1)] as const)
+      }),
+    )
+    const radice = campi.get('worktree')
+    if (!radice || campi.has('bare') || campi.has('prunable')) continue
+    lista.push({
+      radice: normalizzaPercorso(radice),
+      head: campi.get('HEAD') ?? '',
+      branch: campi.get('branch')?.replace(/^refs\/heads\//, '') ?? null,
+    })
+  }
+  return lista
 }
 
 /**

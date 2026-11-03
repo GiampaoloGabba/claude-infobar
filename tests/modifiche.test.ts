@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { diffNuovo, eAnnidato, fileDaStatus, primaRigaDelDiff, righeDaNumstat, soloBlocchi } from '../hooks/git'
+import { diffNuovo, eAnnidato, fileDaStatus, primaRigaDelDiff, righeDaNumstat, soloBlocchi, worktreeDaLista } from '../hooks/git'
 import { filtraFile } from '../hooks/modifiche'
 
 const Z = String.fromCharCode(0)
@@ -142,6 +142,97 @@ test('la ricerca tra i file vuole tutte le parole nel percorso, anche in quello 
   expect(filtraFile(file, 'hooks messaggi').map(f => f.path)).toEqual(['hooks/messaggi.tsx'])
   expect(filtraFile(file, 'vecchia').map(f => f.path)).toEqual(['hooks/barra.ts'])
   expect(filtraFile(file, '')).toHaveLength(3)
+})
+
+// Da un repository vero, più una voce staccata e una con la cartella sparita.
+const WORKTREE = [
+  'worktree E:/work',
+  'HEAD aaa',
+  'branch refs/heads/main',
+  '',
+  'worktree E:/work-agente',
+  'HEAD bbb',
+  'branch refs/heads/intestazione',
+  '',
+  'worktree V:/Temp/wt-base',
+  'HEAD ccc',
+  'detached',
+  '',
+  'worktree E:/work-pulito',
+  'HEAD aaa',
+  'branch refs/heads/pulito',
+  '',
+  'worktree E:/sparito',
+  'HEAD ddd',
+  'branch refs/heads/sparito',
+  'prunable gitdir file points to non-existent location',
+  '',
+  '',
+].join('\n')
+
+test('dalla lista dei worktree: branch, HEAD staccata, e non quelli la cui cartella non c\'è più', () => {
+  expect(worktreeDaLista(WORKTREE)).toEqual([
+    { radice: 'E:/work', head: 'aaa', branch: 'main' },
+    { radice: 'E:/work-agente', head: 'bbb', branch: 'intestazione' },
+    { radice: 'V:/Temp/wt-base', head: 'ccc', branch: null },
+    { radice: 'E:/work-pulito', head: 'aaa', branch: 'pulito' },
+  ])
+})
+
+function conWorktree(on: On, panes: { id: string }[] = [{ id: 'modifiche' }]) {
+  const comandi: string[][] = []
+  on('env.get', ($, e) => ({ value: e.name === 'OS' ? 'Windows_NT' : undefined }))
+  on('session.cwd', () => ({ value: 'e:\\work' }))
+  on('session.usage', () => ({ value: { context: { window: 200_000 }, rateLimits: [] } }) as never)
+  on('fs.read', () => ({ deny: 'ENOENT' }))
+  on('process.run', ($, e) => {
+    comandi.push([...e.argv])
+    const args = e.argv.join(' ')
+    const risposta = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (args.includes('rev-parse')) return risposta('e:/work\n')
+    if (args.includes('worktree list')) return risposta(WORKTREE)
+    const agente = args.includes('-C E:/work-agente')
+    if (args.includes('rev-list')) return risposta(agente ? '2\n' : '0\n')
+    if (args.includes(' status ')) return risposta(agente ? [' M src/a.ts', ''].join(Z) : args.includes('-C e:/work ') ? [' M b.ts', ''].join(Z) : '')
+    if (args.includes('--numstat')) return risposta(agente ? [`2${T}1${T}src/a.ts`, ''].join(Z) : '')
+    if (agente && args.includes('src/a.ts')) return risposta(DIFF_A)
+    return risposta('', 1)
+  })
+  on('tool.call', () => ({ result: { filePath: 'e:/work/b.ts' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.panes', () => ({ value: panes }) as never)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: [''] }))
+  return comandi
+}
+
+test('il pannello mostra gli altri worktree con qualcosa da guardare, con il diff letto lì; la barra conta solo qui', async ($, on) => {
+  const clock = mock.clock(on)
+  const comandi = conWorktree(on)
+  await $.tool.call({ tool: 'Edit', file_path: 'e:/work/b.ts', old_string: 'a', new_string: 'b' } as never)
+  await clock.advance(1000)
+  expect(await (await $.ui.mount(BANDA)).find({ type: 'Text', text: ' ✎ 1' })).toBeDefined()
+
+  await $.command.run({ command: 'modifiche', args: '' } as never)
+  const ui = await $.ui.mount(PANNELLO)
+  expect(await ui.find({ type: 'Text', text: 'FILE MODIFICATI · 1' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'intestazione' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '  work-agente' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '2 commit non nel branch corrente' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'pulito' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'HEAD staccata' })).toBeUndefined()
+
+  await ui.press({ key: 'diff-E:/work-agente::src/a.ts' })
+  expect(comandi.at(-1)).toEqual(['git', '--no-optional-locks', '-C', 'E:/work-agente', 'diff', 'HEAD', '--no-color', '--', 'src/a.ts'])
+  expect((await ui.find({ type: 'Code' }))?.props).toMatchObject({ format: 'diff', source: soloBlocchi(DIFF_A) })
+})
+
+test('a pannello chiuso gli altri worktree non si leggono', async ($, on) => {
+  const clock = mock.clock(on)
+  const comandi = conWorktree(on, [])
+  await $.tool.call({ tool: 'Edit', file_path: 'e:/work/b.ts', old_string: 'a', new_string: 'b' } as never)
+  await clock.advance(1000)
+  expect(comandi.some(c => c.includes('status'))).toBe(true)
+  expect(comandi.some(c => c.includes('worktree'))).toBe(false)
 })
 
 test('con pochi file il pannello non ha il campo di ricerca', async ($, on) => {

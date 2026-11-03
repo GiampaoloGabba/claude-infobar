@@ -43,6 +43,8 @@ const MAX_PNG_INLINE = 2 * 1024 * 1024
 // I documenti di testo che Claude scrive con Write o Edit e che si aprono con il programma di sistema;
 // gli altri file sono codice, e quelli vanno nell'editor.
 const DOCUMENTO_TESTO = /\.(md|markdown|txt|csv|tsv|html?|svg)$/i
+// Il file che `codex exec -o` scrive per convenzione delle skill: nome esatto, nessun altro lo usa.
+const RISPOSTA_CODEX = /(^|[\\/])last-message\.md$/i
 // Quelli che produce con uno script: binari (PDF, Office, OpenDocument), di testo e immagini. Uno screenshot
 // che Claude poi rilegge con Read ha il link una volta sola, se le due chiamate stanno nella stessa riga.
 const ESTENSIONI_PRODOTTI = 'pdf|docx?|xlsx|xlsm|xls|pptx?|odt|ods|odp|rtf|epub|md|markdown|txt|csv|tsv|html?|svg|png|jpe?g|gif|webp'
@@ -108,6 +110,14 @@ function immagineLetta(chiamata: Chiamata): Link | null {
 }
 
 // Le Read di documenti e di codice restano fuori: Claude rilegge CLAUDE.md e i sorgenti di continuo.
+// La risposta di Codex no: nel transcript si vede solo "Read 58 lines", e il testo sta lì.
+function rispostaCodexLetta(chiamata: Chiamata): Link | null {
+  const output = chiamata.output as { type?: unknown; file?: { filePath?: unknown } } | null | undefined
+  const path = stringa(output?.file?.filePath)
+  if (output?.type !== 'text' || !path || !RISPOSTA_CODEX.test(path)) return null
+  return { id: chiamata.tool_use_id ?? path, tipo: 'file', destinazione: path, png: null, size: null }
+}
+
 function fileScritto(chiamata: Chiamata): Link | null {
   const output = chiamata.output as { filePath?: unknown; structuredPatch?: unknown } | null | undefined
   const path = stringa(output?.filePath) ?? percorsoInput(chiamata)
@@ -121,7 +131,7 @@ function fileScritto(chiamata: Chiamata): Link | null {
 export function daAprire(chiamata: Chiamata, immagini = true, trovati: Trovati = {}): Link[] {
   if (chiamata.isErrored || chiamata.output === undefined) return []
   if (chiamata.tool === 'Read') {
-    const letta = immagini ? immagineLetta(chiamata) : null
+    const letta = (immagini ? immagineLetta(chiamata) : null) ?? rispostaCodexLetta(chiamata)
     return letta ? [letta] : []
   }
   if (chiamata.tool === 'Write' || chiamata.tool === 'Edit') {

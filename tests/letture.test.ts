@@ -145,6 +145,37 @@ test('i documenti scritti o modificati si aprono col sistema, il codice nell\'ed
   expect(daAprire({ ...lettura('m', PNG, 'E:/repo/CLAUDE.md'), output: { type: 'text', file: { content: '# x' } } })).toEqual([])
 })
 
+const RISPOSTA_CODEX = 'V:\\Temp\\scratchpad\\codex\\spec-r1b\\last-message.md'
+
+function letturaTesto(id: string, filePath: string) {
+  return { tool_use_id: id, tool: 'Read', input: {}, output: { type: 'text', file: { filePath, content: '# esito', numLines: 1 } }, isErrored: false }
+}
+
+test('tra le letture di testo solo la risposta di Codex ha il link', () => {
+  expect(daAprire(letturaTesto('c', RISPOSTA_CODEX), false)).toEqual([
+    { id: 'c', tipo: 'file', destinazione: RISPOSTA_CODEX, png: null, size: null },
+  ])
+  expect(daAprire(letturaTesto('n', 'E:/repo/docs/not-last-message.md'))).toEqual([])
+  expect(daAprire(letturaTesto('m', 'E:/repo/README.md'))).toEqual([])
+  expect(daAprire({ ...letturaTesto('e', RISPOSTA_CODEX), isErrored: true })).toEqual([])
+})
+
+test("la risposta di Codex letta da sola si apre col sistema, anche con anteprime 'no'", { options: { anteprime: 'no' } }, async ($, on) => {
+  mock.clock(on)
+  const comandi = ospite(on)
+  const { tool_use_id, tool, output, isErrored } = letturaTesto('r1', RISPOSTA_CODEX)
+  const ui = await $.ui.mount({
+    plugin: 'infobar',
+    component: 'ToolResult',
+    surface: 'terminal',
+    viewport: { columns: 120, rows: 40 },
+    props: { tool_use_id, tool, output, isErrored },
+  } as never)
+  expect(await ui.find({ type: 'Text', text: 'last-message.md' })).toBeDefined()
+  await ui.press({ key: 'apri-r1' })
+  expect(comandi).toEqual([['explorer.exe', RISPOSTA_CODEX]])
+})
+
 test("sotto il diff di un markdown modificato c'è il link, anche con anteprime 'no'", { options: { anteprime: 'no' } }, async ($, on) => {
   mock.clock(on)
   const comandi = ospite(on)
