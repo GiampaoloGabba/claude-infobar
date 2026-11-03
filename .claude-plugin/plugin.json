@@ -1,7 +1,7 @@
 {
   "name": "infobar",
-  "description": "Una riga sopra il prompt con modello, effort, cartella, branch e contesto, più semaforo di compattazione, ripresa automatica dopo i rate limit, autorizzazioni di sessione che sopravvivono al compact, anteprime delle immagini incollate, link nel transcript per aprire immagini, documenti, codice nell'editor e URL, pulsanti per copiare risposte, codice e comandi, pannello dei lavori in background con output e stop, file modificati da git con diff, account cswap con switch e uso di Codex",
-  "version": "0.19.0",
+  "description": "Una riga sopra il prompt con modello, effort, cartella, branch e contesto, più semaforo di compattazione, ripresa automatica dopo i rate limit, autorizzazioni di sessione che sopravvivono al compact, anteprime delle immagini incollate, link nel transcript per aprire immagini, documenti, codice nell'editor e URL, pulsanti per copiare risposte, codice e comandi, pannello dei lavori in background con output e stop, file modificati da git con diff, diff di Write ed Edit compattati in una riga che si apre con un clic, account cswap con switch e uso di Codex",
+  "version": "0.20.0",
   "author": {
     "name": "Giampaolo Gabba",
     "url": "https://github.com/GiampaoloGabba"
@@ -46,6 +46,13 @@
       "title": "Apri output con",
       "description": "Con cosa apre l'output di un lavoro il pulsante ↗ apri del pannello dei lavori: editor (il predefinito, quello dell'opzione Editor); notepad++ per Notepad++ con il monitoraggio del file, che segue le righe nuove come tail -f; oppure un comando tuo, con {file} e {riga} al posto del percorso e dell'ultima riga",
       "default": "editor"
+    },
+    "modificheCompatte": {
+      "type": "string",
+      "title": "Modifiche compatte",
+      "description": "Nel transcript del terminale il diff di Write ed Edit diventa una riga con le righe aggiunte e tolte (▸ +12 −3 diff): un clic sulla riga lo apre lì (▴ chiudi anche in fondo), ctrl+o mostra tutto; no lascia i diff aperti come Claude Code",
+      "default": "si",
+      "options": ["si", "no"]
     },
     "copia": {
       "type": "string",

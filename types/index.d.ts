@@ -112,6 +112,8 @@ declare module 'claude-code' {
       /** Per riga del transcript: il messaggio a cui il pannello ti ha appena portato, acceso per un attimo. */
       messaggioEvidenziato: StateFamily<boolean>
       /** Per lettura di immagine (il tool_use_id): la miniatura a blocchi decodificata, 'errore' dove non si è potuto. */
+      /** Le righe compattate (diff di Write ed Edit, output dei comandi) che hai aperto con un clic, per tool_use_id. */
+      modificheAperte: StateFamily<boolean>
       miniatureLette: StateFamily<{ width: number; height: number; rgba: string } | 'errore' | null>
       statoGit: StatoGit
       /** I file che la sessione ha scritto o che i suoi comandi hanno cambiato: percorsi assoluti, minuscoli, con le barre in avanti. */
