@@ -19,7 +19,18 @@ import { apri } from './apri'
 import { PANNELLO_LAVORI, apriLavori, attivitaInCorso, disegnaLavori, lavoriDaAgenti, lavoriDaRiepilogo, lavoriInCorso, lavoroDaNotifica, lavoroFermato } from './lavori'
 import { alterna, registraPannelli } from './pannelli'
 import { PANNELLO_MESSAGGI, apriMessaggi, messaggioInviato, nuovaSessioneMessaggi, quantiMessaggi, registraMessaggi } from './messaggi'
-import { PANNELLO_MODIFICHE, apriModifiche, disegnaModifiche, fileModificati, forseModificati } from './modifiche'
+import {
+  PANNELLO_MODIFICHE,
+  TOOL_DI_FILE,
+  TOOL_DI_SHELL,
+  apriModifiche,
+  comandoFinito,
+  comandoIniziato,
+  disegnaModifiche,
+  fileModificati,
+  fileToccato,
+  forseModificati,
+} from './modifiche'
 import { cartellaSessione } from './sessione'
 import { MAX_LETTURA_PROCESSO, leggiConProcesso, letturaPngGrande } from './file'
 import { aggiornaCodex, codexDaMostrare } from './codex-uso'
@@ -664,7 +675,19 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', async ($, e, next) => {
-    const esito = await next(e)
+    const shell = TOOL_DI_SHELL.has(e.tool)
+    if (shell) comandoIniziato()
+    let esito: Awaited<ReturnType<typeof next>>
+    try {
+      esito = await next(e)
+    } finally {
+      if (shell) comandoFinito()
+    }
+    if (TOOL_DI_FILE.has(e.tool) && !('isError' in esito && esito.isError)) {
+      const { file_path, notebook_path } = e as { file_path?: unknown; notebook_path?: unknown }
+      const path = file_path ?? notebook_path
+      if (typeof path === 'string') await fileToccato($, path).catch(() => undefined)
+    }
     forseModificati($, e.tool)
     if (!e.agentId) {
       const uso = await $.session.usage()

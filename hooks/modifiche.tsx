@@ -15,8 +15,15 @@ const testiDiff = atom({ plugin: 'infobar', key: 'testiDiff' } as const, {} as R
 const filtroModifiche = atom({ plugin: 'infobar', key: 'filtroModifiche' } as const, '')
 const versioneCampo = atom({ plugin: 'infobar', key: 'versioneCampoModifiche' } as const, 0)
 
+const toccati = atom(
+  { plugin: 'infobar', key: 'toccatiSessione' } as const,
+  { sessione: null, file: [], ricostruito: false } as { sessione: string | null; file: string[]; ricostruito: boolean },
+)
+
 // I tool che possono cambiare file: dopo uno di questi lo stato di git si rilegge.
 const TOOL_CHE_SCRIVONO = new Set(['Write', 'Edit', 'NotebookEdit', 'Bash', 'PowerShell'])
+export const TOOL_DI_FILE = new Set(['Write', 'Edit', 'NotebookEdit'])
+export const TOOL_DI_SHELL = new Set(['Bash', 'PowerShell'])
 // Più modifiche ravvicinate (un turno che scrive dieci file) diventano una lettura sola.
 const ATTESA_MS = 800
 const AGGIORNA_PANNELLO_MS = 5000
@@ -100,6 +107,74 @@ let inLettura = false
 let ancora = false
 let attesa: Timer | null = null
 let timer: Timer | null = null
+let comandiInCorso = 0
+let dopoComando = false
+let altriLettiPrima = false
+
+const chiaveFile = (path: string) => normalizzaPercorso(path).toLowerCase()
+const firma = (f: FileGit) => `${f.stato}:${f.aggiunte}:${f.tolte}:${f.da ?? ''}`
+
+async function toccatiDellaSessione($: EngineInterface) {
+  const sessione = await $.session.id()
+  const t = await read($, toccati)
+  if (t.sessione === sessione) return t
+  // /clear o una ripresa nello stesso processo: l'elenco di prima è di un'altra sessione.
+  const nuovo = { sessione, file: [], ricostruito: false }
+  await update($, toccati, () => nuovo)
+  return nuovo
+}
+
+async function segnaToccati($: EngineInterface, paths: readonly string[]) {
+  const t = await toccatiDellaSessione($)
+  const nuovi = [...new Set(paths.map(chiaveFile))].filter(p => !t.file.includes(p))
+  if (nuovi.length) await update($, toccati, v => ({ ...v, file: [...v.file, ...nuovi] }))
+}
+
+/** Un file scritto da Write, Edit o NotebookEdit, anche da un subagent. */
+export async function fileToccato($: EngineInterface, path: string) {
+  await segnaToccati($, [path])
+}
+
+/** Un comando di shell che parte: finché gira, quello che git vede cambiare è suo. */
+export function comandoIniziato() {
+  comandiInCorso++
+}
+
+export function comandoFinito() {
+  comandiInCorso = Math.max(0, comandiInCorso - 1)
+  dopoComando = true
+}
+
+// Una sessione ripresa riparte senza elenco: le Write e le Edit della conversazione principale stanno nel transcript.
+// Una volta sola, all'apertura del pannello; quelle dei subagent e dei comandi di prima non si ricostruiscono.
+async function ricostruisciToccati($: EngineInterface) {
+  const t = await toccatiDellaSessione($)
+  if (t.ricostruito) return
+  await update($, toccati, v => ({ ...v, ricostruito: true }))
+  const messaggi = await $.session.messages().catch(() => [])
+  const paths: string[] = []
+  for (const m of messaggi)
+    for (const u of m.toolUses) {
+      if (u.isError || !TOOL_DI_FILE.has(u.tool)) continue
+      const path = u.input.file_path ?? u.input.notebook_path
+      if (typeof path === 'string') paths.push(path)
+    }
+  await segnaToccati($, paths)
+}
+
+// Senza comandi git in più: i file la cui riga di status è cambiata dalla lettura di prima.
+function cambiati(prima: NonNullable<StatoGit>, stato: NonNullable<StatoGit>, conAltri: boolean): string[] {
+  const vecchi = new Map<string, string>()
+  const elenca = (s: NonNullable<StatoGit>) => (conAltri ? gruppi(s) : gruppi({ ...s, altri: [] }))
+  for (const g of elenca(prima)) for (const f of g.file) vecchi.set(chiaveFile(`${g.radice}/${f.path}`), firma(f))
+  const diversi: string[] = []
+  for (const g of elenca(stato))
+    for (const f of g.file) {
+      const k = chiaveFile(`${g.radice}/${f.path}`)
+      if (vecchi.get(k) !== firma(f)) diversi.push(k)
+    }
+  return diversi
+}
 
 async function aggiorna($: EngineInterface) {
   if (inLettura) {
@@ -110,10 +185,15 @@ async function aggiorna($: EngineInterface) {
   try {
     do {
       ancora = false
+      const delComando = comandiInCorso > 0 || dopoComando
+      dopoComando = false
       const stato = await leggiStato($).catch(() => null)
       const prima = await read($, statoGit)
       // A pannello chiuso nessuno li guarda, e a ogni tool sarebbero troppi comandi git.
-      if (stato) stato.altri = (await pannelloModificheAperto($).catch(() => false)) ? await leggiAltri($, stato.radice).catch(() => []) : (prima?.altri ?? [])
+      const aperto = await pannelloModificheAperto($).catch(() => false)
+      if (stato) stato.altri = aperto ? await leggiAltri($, stato.radice).catch(() => []) : (prima?.altri ?? [])
+      if (delComando && prima && stato && stato.radice === prima.radice) await segnaToccati($, cambiati(prima, stato, aperto && altriLettiPrima))
+      altriLettiPrima = aperto
       const uguale =
         JSON.stringify(prima?.file) === JSON.stringify(stato?.file) &&
         JSON.stringify(prima?.altri) === JSON.stringify(stato?.altri) &&
@@ -181,6 +261,7 @@ export async function apriModifiche($: EngineInterface) {
   if (aperto.isPlaced) segnaAperto(PANNELLO_MODIFICHE)
   await update($, versioneCampo, () => 0)
   await $.ui.focus({ requestId: PANNELLO_MODIFICHE, key: 'cerca-0' }).catch(() => undefined)
+  await ricostruisciToccati($).catch(() => undefined)
   await aggiorna($)
   // A pannello aperto si rilegge anche ogni pochi secondi: le modifiche fatte fuori da Claude non avvisano.
   timer ??= $.clock.every(AGGIORNA_PANNELLO_MS, async () => {
@@ -204,6 +285,7 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
   const testi = await read($, testiDiff)
   const filtro = await read($, filtroModifiche)
   const campo = await read($, versioneCampo)
+  const sessione = await read($, toccati)
   const larghezza = Math.max(30, e.props.bodyColumns - 2)
   const elementi = $.ui.resolve(e)
   if (!('Input' in elementi)) return <elementi.Text dimColor>Il pannello dei file modificati c'è solo nel terminale.</elementi.Text>
@@ -291,10 +373,32 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
     )
   }
 
+  const dellaSessione = new Set(sessione.file)
+  const divisi = (file: FileGit[], radice: string) => {
+    const nostri = file.filter(f => dellaSessione.has(chiaveFile(`${radice}/${f.path}`)))
+    return { nostri, resto: file.filter(f => !nostri.includes(f)) }
+  }
+  // Le intestazioni solo dove la sessione ha toccato qualcosa: senza, l'elenco resta com'era.
+  const elenco = (file: FileGit[], radice: string, prefisso: string) => {
+    const { nostri, resto } = divisi(file, radice)
+    if (!nostri.length) return resto.map(f => rigaFile(f, radice, prefisso))
+    return [
+      <Text key={`sessione-${prefisso}`} color="suggestion" bold>{`questa sessione · ${nostri.length}`}</Text>,
+      ...nostri.map(f => rigaFile(f, radice, prefisso)),
+      ...(resto.length ? [<Text key={`resto-${prefisso}`} dimColor bold>{`altri · ${resto.length}`}</Text>] : []),
+      ...resto.map(f => rigaFile(f, radice, prefisso)),
+    ]
+  }
+  const inOrdine = (file: FileGit[], radice: string) => {
+    const { nostri, resto } = divisi(file, radice)
+    return [...nostri, ...resto]
+  }
+
   const altri = stato.altri
     .map(w => ({ ...w, visibili: filtraFile(w.file, filtro) }))
     .filter(w => w.visibili.length || !parole.length)
-  const primaChiave = visibili[0]?.path ?? altri.flatMap(w => w.visibili.map(f => `${w.radice}::${f.path}`))[0]
+  const primaChiave =
+    inOrdine(visibili, stato.radice)[0]?.path ?? altri.flatMap(w => inOrdine(w.visibili, w.radice).map(f => `${w.radice}::${f.path}`))[0]
 
   const sezioneWorktree = (w: (typeof altri)[number]) => {
     const conti = totaleDi(w.file)
@@ -316,7 +420,7 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
           ) : null}
         </Box>
         {w.commit ? <Text dimColor>{w.commit === 1 ? '1 commit non nel branch corrente' : `${w.commit} commit non nel branch corrente`}</Text> : null}
-        {w.visibili.map(f => rigaFile(f, w.radice, `${w.radice}::`))}
+        {elenco(w.visibili, w.radice, `${w.radice}::`)}
       </Box>
     )
   }
@@ -369,7 +473,7 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
       {!stato.file.length ? (
         <Text dimColor>Nessuna modifica da committare.</Text>
       ) : visibili.length ? (
-        visibili.map(f => rigaFile(f, stato.radice, ''))
+        elenco(visibili, stato.radice, '')
       ) : altri.length ? null : (
         <Text dimColor>Nessun file contiene queste parole nel percorso.</Text>
       )}

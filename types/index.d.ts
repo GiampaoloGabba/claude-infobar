@@ -114,6 +114,8 @@ declare module 'claude-code' {
       /** Per lettura di immagine (il tool_use_id): la miniatura a blocchi decodificata, 'errore' dove non si è potuto. */
       miniatureLette: StateFamily<{ width: number; height: number; rgba: string } | 'errore' | null>
       statoGit: StatoGit
+      /** I file che la sessione ha scritto o che i suoi comandi hanno cambiato: percorsi assoluti, minuscoli, con le barre in avanti. */
+      toccatiSessione: { sessione: string | null; file: string[]; ricostruito: boolean }
       /** I file di cui il pannello mostra il diff, e il diff già letto da git: il disegno non lancia comandi. */
       diffAperti: string[]
       testiDiff: Record<string, string>
