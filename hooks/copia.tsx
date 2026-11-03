@@ -12,6 +12,24 @@ export function blocchiDiCodice(markdown: string): BloccoDiCodice[] {
   return [...markdown.matchAll(RECINTO)].map(m => ({ lingua: m[3] ?? '', testo: (m[4] ?? '').replace(/\n$/, '') }))
 }
 
+const RIGA_TABELLA = /^ {0,3}\|.*\|[ \t]*$/
+const SEPARATORE_TABELLA = /^ {0,3}\|?[ \t]*:?-{3,}:?[ \t]*(\|[ \t]*:?-{3,}:?[ \t]*)*\|?[ \t]*$/
+
+/** Le tabelle markdown fuori dai blocchi di codice, nell'ordine: intestazione, separatore e righe. */
+export function tabelle(markdown: string): string[] {
+  // Una tabella dentro un blocco di codice si copia già con lui.
+  const righe = markdown.replace(RECINTO, m => '\n'.repeat(m.split('\n').length - 1)).split(/\r?\n/)
+  const trovate: string[] = []
+  for (let i = 0; i + 1 < righe.length; i++) {
+    if (!RIGA_TABELLA.test(righe[i]!) || !SEPARATORE_TABELLA.test(righe[i + 1]!)) continue
+    let fine = i + 2
+    while (fine < righe.length && RIGA_TABELLA.test(righe[fine]!)) fine++
+    trovate.push(righe.slice(i, fine).map(r => r.trim()).join('\n'))
+    i = fine - 1
+  }
+  return trovate
+}
+
 /** Il nome del pulsante di ogni blocco: la lingua, `codice` senza; numerato solo dove due si chiamerebbero uguale. */
 export function etichetteBlocchi(blocchi: readonly BloccoDiCodice[]): string[] {
   const nomi = blocchi.map(b => b.lingua || 'codice')
@@ -51,15 +69,12 @@ async function copia($: EngineInterface, riga: string, testo: string, chi: strin
 
 type Pulsante = { chiave: string; etichetta: string; testo: string }
 
-// Sotto un messaggio intermedio la riga dei pulsanti c'è solo se ha qualcosa che valga la pena copiare.
-const RIGHE_MINIME = 3
 // Le ultime risposte finite: il loro ultimo blocco ha sempre la riga, anche se è una frase sola.
 const FINALI_TENUTE = 50
 let attiva = false
 
 /**
  * Da turn.complete: la risposta appena finita, il cui ultimo blocco riceve ora la sua riga di pulsanti.
- * Ridisegna solo i blocchi brevi, gli unici che leggono le risposte finite.
  */
 export async function rispostaFinita($: EngineInterface, testo: string) {
   if (!attiva || !testo.trim()) return
@@ -70,16 +85,6 @@ export async function rispostaFinita($: EngineInterface, testo: string) {
 export function chiudeRisposta(blocco: string, risposte: readonly string[]): boolean {
   const testo = blocco.trim()
   return testo !== '' && risposte.some(r => r.trim().endsWith(testo))
-}
-
-/** Se un blocco ha la riga dei pulsanti comunque, per il suo contenuto: con codice o lungo. */
-export function haDaCopiare(blocco: string): boolean {
-  return blocchiDiCodice(blocco).length > 0 || blocco.trim().split('\n').length >= RIGHE_MINIME
-}
-
-/** Se sotto un blocco di risposta va la riga dei pulsanti: con codice, lungo, o l'ultimo della risposta. */
-export function meritaPulsanti(blocco: string, risposte: readonly string[]): boolean {
-  return haDaCopiare(blocco) || chiudeRisposta(blocco, risposte)
 }
 
 async function pulsanti$($: EngineInterface, e: RenderInput<'AssistantMessage' | 'ToolUse'>, id: string, lista: Pulsante[]) {
@@ -143,14 +148,17 @@ export function registraCopia(on: On, modo: ModoCopia) {
     if (e.props.isSummary || !text.trim()) return sopra
     const blocchi = blocchiDiCodice(text)
     const etichette = etichetteBlocchi(blocchi)
+    const tab = tabelle(text)
     const lista = [
       { chiave: 'copia-testo', etichetta: 'copia', testo: text },
       ...blocchi.map((b, i) => ({ chiave: `copia-codice-${i}`, etichetta: etichette[i]!, testo: b.testo })),
+      ...tab.map((t, i) => ({ chiave: `copia-tabella-${i}`, etichetta: tab.length === 1 ? 'tabella' : `tabella ${i + 1}`, testo: t })),
     ]
     if (modo === 'hover') return aDestra($, e, sopra, firma(text), lista, true)
-    // Solo un blocco breve deve sapere se chiude una risposta: solo lui legge le risposte finite.
-    const conRiga = haDaCopiare(text) || chiudeRisposta(text, await read($, risposteFinite))
-    return conRiga ? rigaSotto($, e, sopra, firma(text), lista) : sopra
+    if (chiudeRisposta(text, await read($, risposteFinite))) return rigaSotto($, e, sopra, firma(text), lista)
+    // A metà lavoro il testo non lo copia nessuno: restano solo codice e tabelle, se ci sono.
+    const pezzi = lista.slice(1)
+    return pezzi.length ? rigaSotto($, e, sopra, firma(text), pezzi) : sopra
   })
 
   on('ui.render', { component: 'ToolUse', surface: 'terminal' }, async ($, e, next) => {

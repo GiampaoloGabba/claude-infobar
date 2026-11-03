@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { blocchiDiCodice, chiudeRisposta, etichetteBlocchi, meritaPulsanti } from '../hooks/copia'
+import { blocchiDiCodice, chiudeRisposta, etichetteBlocchi, tabelle } from '../hooks/copia'
 
 const RISPOSTA = [
   'Lancia questo:',
@@ -47,6 +47,10 @@ function messaggio(surface: 'terminal' | 'desktop', props: Record<string, unknow
 test('una risposta offre di copiare il testo e ogni blocco di codice, e dice per un attimo che ha copiato', async ($, on) => {
   const clock = mock.clock(on)
   const copiati = ospite(on)
+  on('session.model', () => ({ value: 'claude-opus-5-5' }) as never)
+  on('agent.list', () => ({ value: [] }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await $.turn.complete({ reason: 'answer', answer: RISPOSTA, durationMs: 10, isAborted: false, turnId: 't1' } as never)
   const ui = await $.ui.mount(messaggio('terminal', { text: RISPOSTA, isFirstOfReply: true }))
   expect(await ui.find({ type: 'Text', text: 'riga del motore' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '⧉ bash' })).toBeDefined()
@@ -99,14 +103,22 @@ test('la riga di un comando offre di copiarlo, quella di un altro tool no', asyn
   expect(await lettura.find({ type: 'Button' })).toBeUndefined()
 })
 
-test('la riga va sotto i blocchi con codice, quelli lunghi e l\'ultimo di una risposta finita', () => {
+test("un blocco chiude la risposta quando ne è la fine", () => {
   const risposta = 'Controllo la cartella.\n\nFatto: è vuota.'
   expect(chiudeRisposta('Fatto: è vuota.', [risposta])).toBe(true)
   expect(chiudeRisposta('Controllo la cartella.', [risposta])).toBe(false)
-  expect(meritaPulsanti('Ora controllo la cartella.', [])).toBe(false)
-  expect(meritaPulsanti('uno\ndue\ntre', [])).toBe(true)
-  expect(meritaPulsanti('Lancia:\n```sh\nls\n```', [])).toBe(true)
-  expect(meritaPulsanti('Fatto: è vuota.', [risposta])).toBe(true)
+})
+
+test('a metà lavoro solo codice e tabelle si copiano; il testo, anche lungo, no', async ($, on) => {
+  mock.clock(on)
+  ospite(on)
+  const intermedio = (testo: string) => $.ui.mount(messaggio('terminal', { text: testo, isFirstOfReply: false }))
+  expect(await (await intermedio('uno\ndue\ntre\nquattro')).find({ type: 'Button' })).toBeUndefined()
+  const conCodice = await intermedio('Lancia:\n```sh\nls\n```')
+  expect(await conCodice.find({ type: 'Button', key: 'copia-codice-0' })).toBeDefined()
+  expect(await conCodice.find({ type: 'Button', key: 'copia-testo' })).toBeUndefined()
+  const conTabella = await intermedio('| a | b |\n|---|---|\n| 1 | 2 |')
+  expect(await conTabella.find({ type: 'Button', key: 'copia-tabella-0' })).toBeDefined()
 })
 
 test('una frase corta ha la riga di copia solo quando chiude la risposta', async ($, on) => {
@@ -122,4 +134,30 @@ test('una frase corta ha la riga di copia solo quando chiude la risposta', async
   await $.turn.complete({ reason: 'answer', answer: 'Ora controllo.\n\nTutto a posto.', durationMs: 10, isAborted: false, turnId: 't1' } as never)
   expect(await (await $.ui.mount(breve('Ora controllo.'))).find({ type: 'Button' })).toBeUndefined()
   expect(await (await $.ui.mount(breve('Tutto a posto.'))).find({ type: 'Button', key: 'copia-testo' })).toBeDefined()
+})
+
+test('le tabelle markdown si trovano intere, anche più di una, ma non dentro un blocco di codice', () => {
+  const testo = [
+    'Prima:',
+    '',
+    '| Passo | Cosa |',
+    '| --- | :---: |',
+    '| 1 | uno |',
+    '| 2 | due |',
+    '',
+    '```md',
+    '| a | b |',
+    '|---|---|',
+    '| x | y |',
+    '```',
+    '',
+    '  | Solo | intestazione |',
+    '  |------|--------------|',
+    'Fine | con pipe | ma non tabella',
+  ].join('\n')
+  expect(tabelle(testo)).toEqual([
+    '| Passo | Cosa |\n| --- | :---: |\n| 1 | uno |\n| 2 | due |',
+    '| Solo | intestazione |\n|------|--------------|',
+  ])
+  expect(tabelle('una riga | con pipe |\nma niente separatore')).toEqual([])
 })
