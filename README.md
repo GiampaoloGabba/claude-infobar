@@ -131,11 +131,17 @@ Sotto un comando compaiono anche gli URL del suo output, fino a tre: `↗ localh
 
 Nel transcript del terminale il diff di `Write` ed `Edit` non occupa più mezzo schermo: sotto la riga del tool resta una riga sola con le righe aggiunte e tolte, `▸ +12 −3  diff`, o `▸ nuovo · 45 righe  contenuto` per un file creato. Un clic sulla riga apre il diff lì dov'è, disegnato da Claude Code come sempre (la freccia diventa `▾` e la scritta `chiudi`), e un altro clic lo richiude. Con ctrl+o (o `--verbose`) i diff sono tutti aperti, senza clic. Il link all'editor (`↗ VS Code app.ts:7`) resta sotto la riga compatta. Le chiamate finite in errore restano come sono.
 
+Lo stesso per le celle dei notebook Jupyter cambiate con `NotebookEdit`: `▸ +4 −2  diff`, `▸ nuova cella · 10 righe` o `▸ cella tolta · 3 righe`.
+
+Lo stesso per i comandi che cambiano file su disco (`git merge`, `git checkout`, `sed -i`, uno script): Claude Code mette sotto l'output una riga `Updated … (+n −m)` per ogni file, e la mod la riduce a `▸ 7 file cambiati  +190 −0  dettagli`. Se l'output ha un `CONFLICT` di git, accanto compare `✗ conflitti` in rosso. Il clic apre output ed elenco come li disegna Claude Code. Gli altri comandi restano come sono.
+
 Un diff aperto ha `▴ chiudi` anche in fondo, così non serve risalire.
 
-Quando Claude Code raggruppa delle chiamate in una riga (`Listed 1 directory, ran 1 shell command`) e una è fallita, accanto alla riga compare `✗ 1 fallito` in rosso: da sola la riga non lo dice.
+Quando Claude Code raggruppa delle chiamate in una riga (`Listed 1 directory, ran 1 shell command`) e una è fallita, sotto la riga compare `⎿ ✗ 1 fallito` in rosso: da sola la riga non lo dice.
 
-L'opzione `modificheCompatte` ("Modifiche compatte" in `/config`) le spegne con `no`. Solo nel terminale: l'app desktop ha già i suoi blocchi espandibili.
+Le tue risposte alle domande di Claude (`User answered Claude's questions`) sono riordinate sotto `● Le tue risposte:`: per ogni domanda il titolo, la domanda in grigio e sotto la risposta in grassetto (`→ Sì, ovunque uguale`), con le note che hai aggiunto. Con ctrl+o tornano come le scrive Claude Code.
+
+L'opzione `modificheCompatte` ("Modifiche compatte" in `/config`) spegne con `no` i diff compatti; l'avviso dei falliti e le risposte riordinate restano. Solo nel terminale: l'app desktop ha già i suoi blocchi espandibili.
 
 ## Messaggi
 

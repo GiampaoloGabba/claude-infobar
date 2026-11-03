@@ -34,7 +34,7 @@ import {
 import { cartellaSessione } from './sessione'
 import { MAX_LETTURA_PROCESSO, leggiConProcesso, letturaPngGrande } from './file'
 import { aggiornaCodex, codexDaMostrare } from './codex-uso'
-import { registraCompatte, registraFalliti } from './compatte'
+import { registraCompatte, registraFalliti, registraRisposte } from './compatte'
 import { registraCopia, rispostaFinita } from './copia'
 import { EXTENSIONS, type Format, decodeImage, formatOf, imageSize } from './formati'
 import { fitRow, imageNumbers } from './layout'
@@ -517,6 +517,7 @@ export const register: Register = (on, options) => {
   // Dopo i link: registrato più tardi sta sotto, e i link restano sotto la riga compatta.
   if (options.modificheCompatte !== 'no') registraCompatte(on)
   registraFalliti(on)
+  registraRisposte(on)
   registraMessaggi(on)
   registraPannelli(on)
   if (options.copia !== 'no') registraCopia(on, options.copia === 'hover' ? 'hover' : 'sempre')
