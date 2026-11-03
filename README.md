@@ -139,9 +139,9 @@ Un diff aperto ha `▴ chiudi` anche in fondo, così non serve risalire.
 
 Quando Claude Code raggruppa delle chiamate in una riga (`Listed 1 directory, ran 1 shell command`) e una è fallita, sotto la riga compare `⎿ ✗ 1 fallito` in rosso: da sola la riga non lo dice.
 
-Le tue risposte alle domande di Claude (`User answered Claude's questions`) sono riordinate sotto `● Le tue risposte:`: per ogni domanda il titolo, la domanda in grigio e sotto la risposta in grassetto (`→ Sì, ovunque uguale`), con le note che hai aggiunto. Con ctrl+o tornano come le scrive Claude Code.
+Le tue risposte alle domande di Claude (`User answered Claude's questions`) sono riordinate sotto `● Le tue risposte:`: per ogni domanda il titolo, la domanda in grigio e sotto la risposta in grassetto (`→ Sì, ovunque uguale`), con le note che hai aggiunto. Con ctrl+o tornano come le scrive Claude Code. Se invece rifiuti le domande, al posto di `User declined to answer questions` e delle opzioni compare `● Domande rifiutate:` con una riga per domanda, titolo e domanda in grigio.
 
-L'opzione `modificheCompatte` ("Modifiche compatte" in `/config`) spegne con `no` i diff compatti; l'avviso dei falliti e le risposte riordinate restano. Solo nel terminale: l'app desktop ha già i suoi blocchi espandibili.
+L'opzione `modificheCompatte` ("Modifiche compatte" in `/config`) spegne con `no` i diff compatti; l'avviso dei falliti e le risposte e le domande rifiutate restano riordinate. Solo nel terminale: l'app desktop ha già i suoi blocchi espandibili.
 
 ## Messaggi
 

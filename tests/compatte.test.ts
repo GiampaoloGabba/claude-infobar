@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { contaCella, contaRighe, fileDelComando, risposteDate } from '../hooks/compatte'
+import { contaCella, contaRighe, domandeRifiutate, fileDelComando, risposteDate } from '../hooks/compatte'
 
 const EDIT = {
   filePath: 'E:/repo/app.ts',
@@ -155,4 +155,35 @@ test('ogni risposta sta sotto la sua domanda; con ctrl+o resta quella di Claude 
   expect(await ui.find({ type: 'Text', text: 'RISPOSTE DEL MOTORE' })).toBeUndefined()
   const espanso = await $.ui.mount(riga('AskUserQuestion', DOMANDE, { isExpanded: true }))
   expect(await espanso.find({ type: 'Text', text: 'RISPOSTE DEL MOTORE' })).toBeDefined()
+})
+
+const RIFIUTO = "The user doesn't want to proceed with this tool use. The tool use was rejected."
+
+function chiamata(input: unknown, output: unknown, extra: Record<string, unknown> = {}) {
+  return {
+    plugin: 'infobar',
+    component: 'ToolUse',
+    surface: 'terminal',
+    viewport: { columns: 120, rows: 40 },
+    props: { tool_use_id: 'q1', tool: 'AskUserQuestion', input, output, isRunning: false, isErrored: true, isInterrupted: false, ...extra },
+  } as never
+}
+
+test('un rifiuto elenca le domande fatte; un altro errore no', () => {
+  expect(domandeRifiutate(DOMANDE, RIFIUTO)).toEqual([
+    { titolo: 'Filtri', domanda: 'Che forma preferisci?' },
+    { titolo: 'Ovunque', domanda: 'Anche nelle connessioni?' },
+    { titolo: 'Altro', domanda: 'Senza risposta?' },
+  ])
+  expect(domandeRifiutate(DOMANDE, '<tool_use_error>InputValidationError</tool_use_error>')).toBeNull()
+})
+
+test('le domande rifiutate sono una riga per domanda; con ctrl+o resta quella di Claude Code', { options: { editor: 'no' } }, async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['RIFIUTO DEL MOTORE'] }))
+  const ui = await $.ui.mount(chiamata(DOMANDE, RIFIUTO))
+  expect(await ui.find({ type: 'Text', text: 'Domande rifiutate:' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Senza risposta?' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'RIFIUTO DEL MOTORE' })).toBeUndefined()
+  const espanso = await $.ui.mount(chiamata(DOMANDE, RIFIUTO, { isExpanded: true }))
+  expect(await espanso.find({ type: 'Text', text: 'RIFIUTO DEL MOTORE' })).toBeDefined()
 })

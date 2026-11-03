@@ -206,6 +206,18 @@ export function risposteDate(output: unknown): { titolo: string; domanda: string
   return righe.length ? righe : null
 }
 
+/** Le domande di un AskUserQuestion rifiutato, dal suo input; null se non è un rifiuto o non ce ne sono. */
+export function domandeRifiutate(input: unknown, output: unknown): { titolo: string; domanda: string }[] | null {
+  // Il testo è quello che legge il modello: gli altri errori (un input non valido) restano a Claude Code.
+  if (typeof output !== 'string' || !/doesn.t want to proceed/i.test(output)) return null
+  const q = (input as { questions?: unknown } | null | undefined)?.questions
+  if (!Array.isArray(q)) return null
+  const righe = (q as Domanda[]).flatMap(d =>
+    typeof d?.question === 'string' ? [{ titolo: typeof d.header === 'string' ? d.header : '', domanda: d.question }] : [],
+  )
+  return righe.length ? righe : null
+}
+
 /** Le risposte alle domande di Claude: per ognuna la domanda in grigio e, sotto, la risposta in evidenza. */
 export function registraRisposte(on: On) {
   on('ui.render', { component: 'ToolResult', surface: 'terminal' }, async ($, e, next) => {
@@ -231,6 +243,32 @@ export function registraRisposte(on: On) {
               <Text bold>{`→ ${r.risposta}`}</Text>
               {r.note ? <Text dimColor>{`  ${r.note}`}</Text> : null}
             </Box>
+          </Box>
+        ))}
+      </Box>
+    )
+  })
+
+  // Il risultato di un rifiuto è solo il testo per il modello: le domande stanno nell'input, che ha la riga.
+  on('ui.render', { component: 'ToolUse', surface: 'terminal' }, async ($, e, next) => {
+    const p = e.props
+    if (p.tool !== 'AskUserQuestion' || !p.isErrored || p.isRunning || p.isInterrupted || p.isExpanded) return next(e)
+    const righe = domandeRifiutate(p.input, p.output)
+    if (!righe) return next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Text>
+          <Text dimColor>● </Text>
+          <Text>{righe.length === 1 ? 'Domanda rifiutata:' : 'Domande rifiutate:'}</Text>
+        </Text>
+        {righe.map((r, i) => (
+          <Box key={`r${i}`} flexDirection="row">
+            <Text dimColor>{i === 0 ? '  ⎿ ' : '    '}</Text>
+            <Text>
+              {r.titolo ? <Text color="suggestion" bold>{`${r.titolo}  `}</Text> : null}
+              <Text dimColor>{r.domanda}</Text>
+            </Text>
           </Box>
         ))}
       </Box>
