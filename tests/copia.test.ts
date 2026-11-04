@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { blocchiDiCodice, chiudeRisposta, etichetteBlocchi, tabelle } from '../hooks/copia'
+import { blocchiDiCodice, chiudeRisposta, citazioni, etichetteBlocchi, tabelle } from '../hooks/copia'
 
 const RISPOSTA = [
   'Lancia questo:',
@@ -160,4 +160,33 @@ test('le tabelle markdown si trovano intere, anche più di una, ma non dentro un
     '| Solo | intestazione |\n|------|--------------|',
   ])
   expect(tabelle('una riga | con pipe |\nma niente separatore')).toEqual([])
+})
+
+test('le citazioni si copiano senza i ">", una per blocco, ma non quelle dentro un blocco di codice', () => {
+  const testo = [
+    'Mandagli questo:',
+    '',
+    '> Un\'altra sessione sta scrivendo SPEC.md.',
+    '>',
+    '> Quando committi, prendi solo le tue righe.',
+    '',
+    'Poi questo:',
+    '>Seconda',
+    '',
+    '```md',
+    '> dentro il codice',
+    '```',
+  ].join('\n')
+  expect(citazioni(testo)).toEqual([
+    "Un'altra sessione sta scrivendo SPEC.md.\n\nQuando committi, prendi solo le tue righe.",
+    'Seconda',
+  ])
+})
+
+test('una citazione ha il suo pulsante anche a metà lavoro', async ($, on) => {
+  mock.clock(on)
+  ospite(on)
+  const ui = await $.ui.mount(messaggio('terminal', { text: 'Mandagli:\n\n> testo da incollare', isFirstOfReply: false }))
+  expect(await ui.find({ type: 'Button', key: 'copia-citazione-0' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'copia-testo' })).toBeUndefined()
 })

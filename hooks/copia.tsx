@@ -15,10 +15,12 @@ export function blocchiDiCodice(markdown: string): BloccoDiCodice[] {
 const RIGA_TABELLA = /^ {0,3}\|.*\|[ \t]*$/
 const SEPARATORE_TABELLA = /^ {0,3}\|?[ \t]*:?-{3,}:?[ \t]*(\|[ \t]*:?-{3,}:?[ \t]*)*\|?[ \t]*$/
 
+// Quello che sta in un blocco di codice si copia già con lui: le sue righe diventano vuote.
+const senzaRecinti = (markdown: string) => markdown.replace(RECINTO, m => '\n'.repeat(m.split('\n').length - 1)).split(/\r?\n/)
+
 /** Le tabelle markdown fuori dai blocchi di codice, nell'ordine: intestazione, separatore e righe. */
 export function tabelle(markdown: string): string[] {
-  // Una tabella dentro un blocco di codice si copia già con lui.
-  const righe = markdown.replace(RECINTO, m => '\n'.repeat(m.split('\n').length - 1)).split(/\r?\n/)
+  const righe = senzaRecinti(markdown)
   const trovate: string[] = []
   for (let i = 0; i + 1 < righe.length; i++) {
     if (!RIGA_TABELLA.test(righe[i]!) || !SEPARATORE_TABELLA.test(righe[i + 1]!)) continue
@@ -26,6 +28,27 @@ export function tabelle(markdown: string): string[] {
     while (fine < righe.length && RIGA_TABELLA.test(righe[fine]!)) fine++
     trovate.push(righe.slice(i, fine).map(r => r.trim()).join('\n'))
     i = fine - 1
+  }
+  return trovate
+}
+
+const RIGA_CITAZIONE = /^ {0,3}> ?/
+
+/**
+ * Le citazioni (`> testo`) fuori dai blocchi di codice, senza i `>`: è il testo da incollare altrove, che il
+ * terminale disegna con la barra `▎` davanti a ogni riga.
+ */
+export function citazioni(markdown: string): string[] {
+  const trovate: string[] = []
+  let corrente: string[] = []
+  for (const riga of [...senzaRecinti(markdown), '']) {
+    if (RIGA_CITAZIONE.test(riga)) {
+      corrente.push(riga.replace(RIGA_CITAZIONE, ''))
+      continue
+    }
+    const testo = corrente.join('\n').trim()
+    if (testo) trovate.push(testo)
+    corrente = []
   }
   return trovate
 }
@@ -149,14 +172,16 @@ export function registraCopia(on: On, modo: ModoCopia) {
     const blocchi = blocchiDiCodice(text)
     const etichette = etichetteBlocchi(blocchi)
     const tab = tabelle(text)
+    const cit = citazioni(text)
     const lista = [
       { chiave: 'copia-testo', etichetta: 'copia', testo: text },
       ...blocchi.map((b, i) => ({ chiave: `copia-codice-${i}`, etichetta: etichette[i]!, testo: b.testo })),
       ...tab.map((t, i) => ({ chiave: `copia-tabella-${i}`, etichetta: tab.length === 1 ? 'tabella' : `tabella ${i + 1}`, testo: t })),
+      ...cit.map((c, i) => ({ chiave: `copia-citazione-${i}`, etichetta: cit.length === 1 ? 'citazione' : `citazione ${i + 1}`, testo: c })),
     ]
     if (modo === 'hover') return aDestra($, e, sopra, firma(text), lista, true)
     if (chiudeRisposta(text, await read($, risposteFinite))) return rigaSotto($, e, sopra, firma(text), lista)
-    // A metà lavoro il testo non lo copia nessuno: restano solo codice e tabelle, se ci sono.
+    // A metà lavoro il testo non lo copia nessuno: restano solo codice, tabelle e citazioni, se ci sono.
     const pezzi = lista.slice(1)
     return pezzi.length ? rigaSotto($, e, sopra, firma(text), pezzi) : sopra
   })
