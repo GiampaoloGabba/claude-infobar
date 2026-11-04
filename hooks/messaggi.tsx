@@ -202,7 +202,7 @@ export async function disegnaMessaggi($: EngineInterface, e: RenderInput<'Pane'>
   const campo = await read($, versioneCampo)
   const larghezza = Math.max(30, e.props.bodyColumns - 2)
   const elementi = $.ui.resolve(e)
-  if (!('Input' in elementi)) return <elementi.Text dimColor>Il pannello dei messaggi c'è solo nel terminale.</elementi.Text>
+  if (e.surface !== 'terminal' || !('Input' in elementi)) return <elementi.Text dimColor>Il pannello dei messaggi c'è solo nel terminale.</elementi.Text>
   const { Box, Button, Input, Text } = elementi
   // I più recenti in cima: di solito si torna a qualcosa di poco fa.
   const trovati = filtra(lista, filtro).reverse()

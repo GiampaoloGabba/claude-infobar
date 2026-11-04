@@ -20,13 +20,8 @@ const toccati = atom(
   { sessione: null, file: [], ricostruito: false } as { sessione: string | null; file: string[]; ricostruito: boolean },
 )
 
-// I tool che possono cambiare file: dopo uno di questi lo stato di git si rilegge.
-const TOOL_CHE_SCRIVONO = new Set(['Write', 'Edit', 'NotebookEdit', 'Bash', 'PowerShell'])
 export const TOOL_DI_FILE = new Set(['Write', 'Edit', 'NotebookEdit'])
-export const TOOL_DI_SHELL = new Set(['Bash', 'PowerShell'])
-// Più modifiche ravvicinate (un turno che scrive dieci file) diventano una lettura sola.
-const ATTESA_MS = 800
-const AGGIORNA_PANNELLO_MS = 5000
+const AGGIORNA_PANNELLO_MS = 15_000
 // Un diff più lungo nel pannello non si legge: il resto si guarda nell'editor.
 const RIGHE_DIFF = 300
 // I file nuovi non hanno numstat: le righe si contano leggendoli, ma non all'infinito.
@@ -105,14 +100,9 @@ function gruppi(stato: NonNullable<StatoGit>) {
 
 let inLettura = false
 let ancora = false
-let attesa: Timer | null = null
 let timer: Timer | null = null
-let comandiInCorso = 0
-let dopoComando = false
-let altriLettiPrima = false
 
 const chiaveFile = (path: string) => normalizzaPercorso(path).toLowerCase()
-const firma = (f: FileGit) => `${f.stato}:${f.aggiunte}:${f.tolte}:${f.da ?? ''}`
 
 async function toccatiDellaSessione($: EngineInterface) {
   const sessione = await $.session.id()
@@ -135,14 +125,23 @@ export async function fileToccato($: EngineInterface, path: string) {
   await segnaToccati($, [path])
 }
 
-/** Un comando di shell che parte: finché gira, quello che git vede cambiare è suo. */
-export function comandoIniziato() {
-  comandiInCorso++
+/**
+ * I file che un comando Bash ha cambiato, come li ha visti Claude Code. Con un'altra sessione o un altro agente al
+ * lavoro nello stesso tree Claude Code non ne attribuisce nessuno (`shared`): meglio un file mancante che quelli
+ * degli altri. PowerShell l'elenco non ce l'ha: i suoi file restano tra gli altri.
+ */
+export function fileCambiatiDalComando(output: unknown): string[] {
+  const d = (output as { bashEditDiff?: unknown } | null | undefined)?.bashEditDiff as
+    | { files?: { filePath?: unknown }[]; changedFiles?: unknown; shared?: true }
+    | undefined
+  if (!d || d.shared) return []
+  const paths = Array.isArray(d.changedFiles) ? d.changedFiles : (d.files ?? []).map(f => f?.filePath)
+  return paths.filter((p): p is string => typeof p === 'string')
 }
 
-export function comandoFinito() {
-  comandiInCorso = Math.max(0, comandiInCorso - 1)
-  dopoComando = true
+/** Un comando Bash finito: i file che ha cambiato sono della sessione. */
+export async function comandoFinito($: EngineInterface, output: unknown) {
+  await segnaToccati($, fileCambiatiDalComando(output))
 }
 
 // Una sessione ripresa riparte senza elenco: le Write e le Edit della conversazione principale stanno nel transcript.
@@ -162,20 +161,6 @@ async function ricostruisciToccati($: EngineInterface) {
   await segnaToccati($, paths)
 }
 
-// Senza comandi git in più: i file la cui riga di status è cambiata dalla lettura di prima.
-function cambiati(prima: NonNullable<StatoGit>, stato: NonNullable<StatoGit>, conAltri: boolean): string[] {
-  const vecchi = new Map<string, string>()
-  const elenca = (s: NonNullable<StatoGit>) => (conAltri ? gruppi(s) : gruppi({ ...s, altri: [] }))
-  for (const g of elenca(prima)) for (const f of g.file) vecchi.set(chiaveFile(`${g.radice}/${f.path}`), firma(f))
-  const diversi: string[] = []
-  for (const g of elenca(stato))
-    for (const f of g.file) {
-      const k = chiaveFile(`${g.radice}/${f.path}`)
-      if (vecchi.get(k) !== firma(f)) diversi.push(k)
-    }
-  return diversi
-}
-
 async function aggiorna($: EngineInterface) {
   if (inLettura) {
     ancora = true
@@ -185,15 +170,11 @@ async function aggiorna($: EngineInterface) {
   try {
     do {
       ancora = false
-      const delComando = comandiInCorso > 0 || dopoComando
-      dopoComando = false
       const stato = await leggiStato($).catch(() => null)
       const prima = await read($, statoGit)
-      // A pannello chiuso nessuno li guarda, e a ogni tool sarebbero troppi comandi git.
+      // A pannello chiuso nessuno li guarda.
       const aperto = await pannelloModificheAperto($).catch(() => false)
       if (stato) stato.altri = aperto ? await leggiAltri($, stato.radice).catch(() => []) : (prima?.altri ?? [])
-      if (delComando && prima && stato && stato.radice === prima.radice) await segnaToccati($, cambiati(prima, stato, aperto && altriLettiPrima))
-      altriLettiPrima = aperto
       const uguale =
         JSON.stringify(prima?.file) === JSON.stringify(stato?.file) &&
         JSON.stringify(prima?.altri) === JSON.stringify(stato?.altri) &&
@@ -206,11 +187,9 @@ async function aggiorna($: EngineInterface) {
   }
 }
 
-/** Dopo un tool che può aver cambiato file, o un prompt (i file li cambi anche tu): lo stato si rilegge. */
-export function forseModificati($: EngineInterface, tool?: string) {
-  if (tool && !TOOL_CHE_SCRIVONO.has(tool)) return
-  attesa?.cancel()
-  attesa = $.clock.after(ATTESA_MS, () => void aggiorna($))
+/** All'avvio e a fine risposta: lo stato di git si rilegge una volta, non dopo ogni tool. */
+export function rileggiModifiche($: EngineInterface) {
+  void aggiorna($)
 }
 
 export async function fileModificati($: EngineInterface): Promise<number | null> {
@@ -263,7 +242,7 @@ export async function apriModifiche($: EngineInterface) {
   await $.ui.focus({ requestId: PANNELLO_MODIFICHE, key: 'cerca-0' }).catch(() => undefined)
   await ricostruisciToccati($).catch(() => undefined)
   await aggiorna($)
-  // A pannello aperto si rilegge anche ogni pochi secondi: le modifiche fatte fuori da Claude non avvisano.
+  // A pannello aperto si rilegge anche ogni tanto: le modifiche fatte fuori da Claude non avvisano.
   timer ??= $.clock.every(AGGIORNA_PANNELLO_MS, async () => {
     if (await pannelloModificheAperto($)) return aggiorna($)
     timer?.cancel()
@@ -288,7 +267,7 @@ export async function disegnaModifiche($: EngineInterface, e: RenderInput<'Pane'
   const sessione = await read($, toccati)
   const larghezza = Math.max(30, e.props.bodyColumns - 2)
   const elementi = $.ui.resolve(e)
-  if (!('Input' in elementi)) return <elementi.Text dimColor>Il pannello dei file modificati c'è solo nel terminale.</elementi.Text>
+  if (e.surface !== 'terminal' || !('Input' in elementi)) return <elementi.Text dimColor>Il pannello dei file modificati c'è solo nel terminale.</elementi.Text>
   const { Box, Text, Button, Code, Input } = elementi
 
   if (!stato)

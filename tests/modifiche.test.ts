@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import type { Mounted } from 'claude-code/testing'
+import type { Engine, Mounted } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { diffNuovo, eAnnidato, fileDaStatus, primaRigaDelDiff, righeDaNumstat, soloBlocchi, worktreeDaLista } from '../hooks/git'
@@ -88,10 +88,17 @@ const PANNELLO = {
 
 const BANDA = { plugin: 'infobar', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, bodyColumns: 120 } } as never
 
-test('dopo una scrittura di Claude la barra conta i file da committare, e il pannello li elenca con il diff', async ($, on) => {
+async function fineRisposta($: Engine, on: On) {
+  on('session.model', () => ({ value: 'claude-opus-5-5' }) as never)
+  on('agent.list', () => ({ value: [] }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await $.turn.complete({ reason: 'answer', answer: 'Fatto.', durationMs: 10, isAborted: false, turnId: 't1' } as never)
+}
+
+test('a fine risposta la barra conta i file da committare, e il pannello li elenca con il diff', async ($, on) => {
   const clock = mock.clock(on)
   const comandi = ospite(on)
-  await $.tool.call({ tool: 'Edit', file_path: 'E:/work/src/a.ts', old_string: 'due', new_string: 'DUE' } as never)
+  await fineRisposta($, on)
   await clock.advance(1000)
 
   expect(await (await $.ui.mount(BANDA)).find({ type: 'Text', text: ' ✎ 4' })).toBeDefined()
@@ -108,15 +115,14 @@ test('dopo una scrittura di Claude la barra conta i file da committare, e il pan
   expect((await ui.find({ type: 'Code' }))?.props).toMatchObject({ format: 'diff', source: soloBlocchi(DIFF_A) })
 })
 
-test('un file nuovo conta le sue righe; un tool che non scrive non rilegge git', async ($, on) => {
+test('un file nuovo conta le sue righe; i tool, anche quelli che scrivono, non rileggono git', async ($, on) => {
   const clock = mock.clock(on)
   const comandi = ospite(on)
-  await $.tool.call({ tool: 'Read', file_path: 'E:/work/x.ts' } as never)
-  await clock.advance(1000)
+  await $.tool.call({ tool: 'Write', file_path: 'E:/work/src/con spazio.ts', content: 'x' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'pnpm gen', tool_use_id: 'b1' } as never)
+  await clock.advance(20_000)
   expect(comandi.some(c => c.includes('status'))).toBe(false)
 
-  await $.tool.call({ tool: 'Write', file_path: 'E:/work/src/con spazio.ts', content: 'x' } as never)
-  await clock.advance(1000)
   await $.command.run({ command: 'modifiche', args: '' } as never)
   const ui = await $.ui.mount(PANNELLO)
   expect(await ui.find({ type: 'Text', text: '+3' })).toBeDefined()
@@ -209,7 +215,7 @@ function conWorktree(on: On, panes: { id: string }[] = [{ id: 'modifiche' }]) {
 test('il pannello mostra gli altri worktree con qualcosa da guardare, con il diff letto lì; la barra conta solo qui', async ($, on) => {
   const clock = mock.clock(on)
   const comandi = conWorktree(on)
-  await $.tool.call({ tool: 'Edit', file_path: 'e:/work/b.ts', old_string: 'a', new_string: 'b' } as never)
+  await fineRisposta($, on)
   await clock.advance(1000)
   expect(await (await $.ui.mount(BANDA)).find({ type: 'Text', text: ' ✎ 1' })).toBeDefined()
 
@@ -230,13 +236,13 @@ test('il pannello mostra gli altri worktree con qualcosa da guardare, con il dif
 test('a pannello chiuso gli altri worktree non si leggono', async ($, on) => {
   const clock = mock.clock(on)
   const comandi = conWorktree(on, [])
-  await $.tool.call({ tool: 'Edit', file_path: 'e:/work/b.ts', old_string: 'a', new_string: 'b' } as never)
+  await fineRisposta($, on)
   await clock.advance(1000)
   expect(comandi.some(c => c.includes('status'))).toBe(true)
   expect(comandi.some(c => c.includes('worktree'))).toBe(false)
 })
 
-function conStatus(on: On, status: { voci: string[] }, messaggi: unknown[] = []) {
+function conStatus(on: On, status: { voci: string[]; risultato?: unknown }, messaggi: unknown[] = []) {
   on('env.get', ($, e) => ({ value: e.name === 'OS' ? 'Windows_NT' : undefined }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.messages', () => ({ value: messaggi }) as never)
@@ -250,7 +256,7 @@ function conStatus(on: On, status: { voci: string[] }, messaggi: unknown[] = [])
     if (args.includes(' status ')) return risposta([...status.voci, ''].join(Z))
     return risposta('', 1)
   })
-  on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false } }))
+  on('tool.call', () => ({ result: status.risultato ?? { stdout: '', stderr: '', interrupted: false } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.panes', () => ({ value: [{ id: 'modifiche' }] }) as never)
   on('ui.render', () => ({ type: 'Text', props: {}, children: [''] }))
@@ -280,25 +286,6 @@ test('senza file della sessione niente intestazioni', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /questa sessione|altri ·/ })).toBeUndefined()
 })
 
-test('un comando di shell si prende i file che cambiano mentre gira, non quelli cambiati dopo da altri', async ($, on) => {
-  const clock = mock.clock(on)
-  const status = { voci: [' M a.ts'] }
-  conStatus(on, status)
-  await $.command.run({ command: 'modifiche', args: '' } as never)
-  await clock.advance(1000)
-
-  status.voci = [' M a.ts', '?? generato.ts']
-  await $.tool.call({ tool: 'PowerShell', command: 'pnpm gen', tool_use_id: 'p1' } as never)
-  await clock.advance(1000)
-  status.voci = [' M a.ts', '?? generato.ts', ' M tuo.ts']
-  await clock.advance(6000)
-
-  const testi = await nomi(await $.ui.mount(PANNELLO))
-  expect(testi).toContain('questa sessione · 1')
-  expect(testi.indexOf('generato.ts')).toBeLessThan(testi.indexOf('altri · 2'))
-  expect(testi.indexOf('tuo.ts')).toBeGreaterThan(testi.indexOf('altri · 2'))
-})
-
 test('in una sessione ripresa i file scritti si ritrovano nel transcript', async ($, on) => {
   const clock = mock.clock(on)
   const scrittura = { role: 'assistant', text: '', toolUses: [{ tool_use_id: 't1', tool: 'Write', input: { file_path: 'E:\\work\\b.ts' } }] }
@@ -321,4 +308,24 @@ test('con pochi file il pannello non ha il campo di ricerca', async ($, on) => {
   const ui = await $.ui.mount(PANNELLO)
   expect(await ui.find({ type: 'Text', text: 'FILE MODIFICATI · 4' })).toBeDefined()
   expect(await ui.find({ type: 'Input' })).toBeUndefined()
+})
+
+test("un Bash si prende i file dell'elenco di Claude Code; con altri al lavoro nel tree, e per PowerShell, nessuno", async ($, on) => {
+  const clock = mock.clock(on)
+  const status: { voci: string[]; risultato?: unknown } = { voci: [' M a.ts', ' M sed.ts', ' M condiviso.ts', ' M ps.ts'] }
+  conStatus(on, status)
+  status.risultato = { stdout: '', stderr: '', interrupted: false, bashEditDiff: { files: [], moreFiles: 0, changedFiles: ['E:/work/sed.ts'] } }
+  await $.tool.call({ tool: 'Bash', command: 'sed -i s/a/b/ sed.ts', tool_use_id: 'b1' } as never)
+  status.risultato = { stdout: '', stderr: '', interrupted: false, bashEditDiff: { files: [], moreFiles: 0, shared: true } }
+  await $.tool.call({ tool: 'Bash', command: 'pnpm gen', tool_use_id: 'b2' } as never)
+  status.risultato = { stdout: '', stderr: '', interrupted: false }
+  await $.tool.call({ tool: 'PowerShell', command: 'pnpm gen', tool_use_id: 'p1' } as never)
+  await $.command.run({ command: 'modifiche', args: '' } as never)
+  await clock.advance(1000)
+
+  const testi = await nomi(await $.ui.mount(PANNELLO))
+  expect(testi).toContain('questa sessione · 1')
+  expect(testi.indexOf('sed.ts')).toBeLessThan(testi.indexOf('altri · 3'))
+  expect(testi.indexOf('condiviso.ts')).toBeGreaterThan(testi.indexOf('altri · 3'))
+  expect(testi.indexOf('ps.ts')).toBeGreaterThan(testi.indexOf('altri · 3'))
 })

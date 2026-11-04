@@ -282,3 +282,29 @@ test('cartella e branch si accorciano togliendo dal più lungo, senza scendere s
 test('l\'effort in due lettere, e un livello sconosciuto com\'è', () => {
   expect(['low', 'medium', 'high', 'xhigh', 'max', 'boh'].map(siglaEffort)).toEqual(['lw', 'md', 'hi', 'xh', 'mx', 'boh'])
 })
+
+test("cartella e branch arrivano anche senza l'avvio, a fine risposta, e seguono la sessione in un worktree", async ($, on) => {
+  mock.clock(on)
+  sessione(on, {})
+  let cwd = 'E:/work/mio-progetto'
+  on('session.cwd', () => ({ value: cwd }))
+  on('fs.exists', ($, e) => ({ value: e.path.replaceAll(String.fromCharCode(92), '/').endsWith('mio-progetto/.git') }))
+  on('fs.stat', () => ({ value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } }))
+  on('fs.read', () => ({ value: 'ref: refs/heads/main' }))
+  on('agent.list', () => ({ value: [] }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  const fine = () => $.turn.complete({ reason: 'answer', answer: 'Fatto.', durationMs: 10, isAborted: false, turnId: 't1' } as never)
+  const banda = () => $.ui.mount({ plugin: 'infobar', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, bodyColumns: 120 } as never })
+
+  await fine()
+  const prima = await banda()
+  expect(await prima.find({ type: 'Text', text: 'mio-progetto' })).toBeDefined()
+  expect(await prima.find({ type: 'Text', text: ' (main)' })).toBeDefined()
+  await prima.unmount()
+
+  cwd = 'E:/work/.claude/worktrees/agente'
+  await fine()
+  const dopo = await banda()
+  expect(await dopo.find({ type: 'Text', text: 'agente' })).toBeDefined()
+  expect(await dopo.find({ type: 'Text', text: ' (main)' })).toBeUndefined()
+})

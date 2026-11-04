@@ -22,14 +22,12 @@ import { PANNELLO_MESSAGGI, apriMessaggi, messaggioInviato, nuovaSessioneMessagg
 import {
   PANNELLO_MODIFICHE,
   TOOL_DI_FILE,
-  TOOL_DI_SHELL,
   apriModifiche,
   comandoFinito,
-  comandoIniziato,
   disegnaModifiche,
   fileModificati,
   fileToccato,
-  forseModificati,
+  rileggiModifiche,
 } from './modifiche'
 import { cartellaSessione } from './sessione'
 import { MAX_LETTURA_PROCESSO, leggiConProcesso, letturaPngGrande } from './file'
@@ -91,6 +89,7 @@ const SOGLIE = [85, 70]
 const MAX_TENTATIVI = 4
 
 let fileHead: string | null = null
+let cwdVisto: string | null = null
 let timerRipresa: Timer | null = null
 
 async function trovaHead($: EngineInterface): Promise<string | null> {
@@ -109,9 +108,20 @@ async function aggiornaBranch($: EngineInterface) {
   if ((await read($, branch)) !== ramo) await update($, branch, () => ramo)
 }
 
+// A ogni giro e non solo all'avvio: la sessione può entrare in un worktree, e lo stato può ripartire vuoto.
+async function aggiornaCartella($: EngineInterface) {
+  const cwd = await $.session.cwd()
+  const dir = nomeCartella(cwd)
+  if (cwd === cwdVisto && (await read($, cartella)) === dir) return
+  cwdVisto = cwd
+  fileHead = await trovaHead($).catch(() => null)
+  if ((await read($, cartella)) !== dir) await update($, cartella, () => dir)
+}
+
 async function aggiornaIntestazione($: EngineInterface) {
   const nome = nomeModello(await $.session.model())
   if ((await read($, modello)) !== nome) await update($, modello, () => nome)
+  await aggiornaCartella($).catch(() => undefined)
   await aggiornaBranch($)
 }
 
@@ -523,6 +533,9 @@ export const register: Register = (on, options) => {
   if (options.copia !== 'no') registraCopia(on, options.copia === 'hover' ? 'hover' : 'sempre')
 
   on('session.start', async ($, e, next) => {
+    // Per prima: se dopo qualcosa fallisce (cswap, un comando), cartella e branch ci sono comunque.
+    await aggiornaCartella($).catch(() => undefined)
+    await aggiornaBranch($).catch(() => undefined)
     await nuovaSessioneMessaggi($)
     await $.command.register({ name: 'autorizza', description: 'Aggiunge un\'autorizzazione di sessione (alias: db, prod, deploy, commit, push)', argumentHint: '[testo|alias]' })
     await $.command.register({ name: 'revoca', description: 'Revoca un\'autorizzazione di sessione', argumentHint: '<n|tutte>' })
@@ -548,12 +561,9 @@ export const register: Register = (on, options) => {
         if (conCodex) void aggiornaCodex($).catch(() => undefined)
       })
     }
-    const dir = nomeCartella(await $.session.cwd())
-    if ((await read($, cartella)) !== dir) await update($, cartella, () => dir)
-    fileHead = await trovaHead($)
     await aggiornaTutto($)
     await armaRipresa($)
-    forseModificati($)
+    rileggiModifiche($)
     if (conAnteprime) {
       if (scelta !== 'immagini' && scelta !== 'blocchi' && scelta !== 'etichette') fissaAnteprima((await terminaleConImmagini($)) ? 'immagini' : 'blocchi')
       sincronizza($, (await $.prompt.read()).text)
@@ -578,6 +588,7 @@ export const register: Register = (on, options) => {
       return next(e)
     }
     if ((await read($, turnoAttivo)) !== false) await update($, turnoAttivo, () => false)
+    rileggiModifiche($)
     if (e.reason === 'answer') if ((await read($, tentativi)) !== 0) await update($, tentativi, () => 0)
     await aggiornaIntestazione($)
     await lavoriDaAgenti($)
@@ -616,7 +627,6 @@ export const register: Register = (on, options) => {
     if (conAnteprime) sincronizza($, '')
     if (e.origin.kind === 'task-notification') await lavoroDaNotifica($, e.text)
     const daPersona = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
-    if (daPersona) forseModificati($)
     if (daPersona) await messaggioInviato($, e.text)
     if (daPersona) {
       if (await read($, ripresa)) await annullaRipresa($)
@@ -680,20 +690,13 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', async ($, e, next) => {
-    const shell = TOOL_DI_SHELL.has(e.tool)
-    if (shell) comandoIniziato()
-    let esito: Awaited<ReturnType<typeof next>>
-    try {
-      esito = await next(e)
-    } finally {
-      if (shell) comandoFinito()
-    }
+    const esito = await next(e)
+    if (e.tool === 'Bash' && 'result' in esito && !esito.isError) await comandoFinito($, esito.result).catch(() => undefined)
     if (TOOL_DI_FILE.has(e.tool) && !('isError' in esito && esito.isError)) {
       const { file_path, notebook_path } = e as { file_path?: unknown; notebook_path?: unknown }
       const path = file_path ?? notebook_path
       if (typeof path === 'string') await fileToccato($, path).catch(() => undefined)
     }
-    forseModificati($, e.tool)
     if (!e.agentId) {
       const uso = await $.session.usage()
       await aggiornaContesto($, uso.context)
