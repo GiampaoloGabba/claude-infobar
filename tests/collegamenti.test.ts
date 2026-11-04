@@ -51,11 +51,11 @@ test('il comando apre il file alla riga, su Windows passando da ShellExecute', (
 test('gli URL dell\'output: senza colori, senza punteggiatura finale, senza quelli già nel comando', () => {
   const vite = '  \x1b[32m➜\x1b[39m  \x1b[1mLocal\x1b[22m:   \x1b[36mhttp://localhost:\x1b[1m5173\x1b[22m/\x1b[39m\n'
   expect(urlNelTesto(vite)).toEqual(['http://localhost:5173/'])
-  expect(urlNelTesto('Docs: see https://example.com/guide. Or (https://example.com/faq),')).toEqual([
-    'https://example.com/guide',
-    'https://example.com/faq',
+  expect(urlNelTesto('Docs: see https://acme.io/guide. Or (https://acme.io/faq),')).toEqual([
+    'https://acme.io/guide',
+    'https://acme.io/faq',
   ])
-  expect(urlNelTesto('{"url":"https://api.example.com/v1"}', 'curl https://api.example.com/v1')).toEqual([])
+  expect(urlNelTesto('{"url":"https://api.acme.io/v1"}', 'curl https://api.acme.io/v1')).toEqual([])
   expect(urlNelTesto('http://a.it http://b.it http://c.it http://d.it')).toHaveLength(3)
 })
 
@@ -188,4 +188,17 @@ test('un server in background: il link compare quando il suo output stampa l\'in
   await clock.advance(1000)
   const ui = await $.ui.mount(rigaRisultato('Bash', 'b2', { stdout: '' }))
   expect(await ui.find({ type: 'Text', text: 'localhost:5173' })).toBeDefined()
+})
+
+test('schemi, namespace, licenze ed esempi nei dati stampati non diventano link', () => {
+  const output = [
+    '{"$schema":"http://json-schema.org/draft-07/schema#","type":"object"}',
+    '<svg xmlns="http://www.w3.org/2000/svg"><a href="https://schemas.microsoft.com/x/2006"/></svg>',
+    '<root xsi:schemaLocation="https://acme.io/conf.xsd"/>',
+    '// Licensed under https://www.apache.org/licenses/LICENSE-2.0',
+    'GET https://api.example.com/v1',
+    'server: http://localhost:5173/',
+  ].join('\n')
+  expect(urlNelTesto(output, 'sqlite3 state.sqlite .schema')).toEqual(['http://localhost:5173/'])
+  expect(urlNelTesto('docs: https://www.apache.org/dyn/closer.cgi', 'node x.js')).toEqual(['https://www.apache.org/dyn/closer.cgi'])
 })

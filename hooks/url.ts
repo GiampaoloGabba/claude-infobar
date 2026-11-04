@@ -12,6 +12,11 @@ const LETTORI = new Set([
 ])
 const GIT_LETTORI = new Set(['diff', 'log', 'show', 'blame', 'grep', 'cat-file'])
 
+// URL che sono nomi, non pagine: schemi e namespace dentro JSON, XML e SVG, licenze nelle intestazioni, segnaposto
+// degli esempi. Escono da qualunque comando che stampi dati (sqlite3, node -e, un'API) e non c'è niente da aprire.
+const IDENTIFICATORI =
+  /^https?:\/\/(?:[^/?#]*\.)?(?:json-schema\.org|json\.schemastore\.org|w3\.org|schema\.org|purl\.org|xmlns\.com|ns\.adobe\.com|schemas\.(?:microsoft|openxmlformats|android|xmlsoap)\.(?:com|org)|opensource\.org|apache\.org\/licenses|gnu\.org\/licenses|creativecommons\.org\/licenses|example\.(?:com|org|net))(?:[/?#:]|$)|\.(?:xsd|dtd)(?:[?#]|$)/i
+
 /** Se il comando stampa il contenuto di file: basta un pezzo (tra ; && ||) che cominci con uno di quei programmi. */
 export function stampaFile(comando: string): boolean {
   return comando.split(/;|&&|\|\||\r?\n/).some(pezzo => {
@@ -31,7 +36,7 @@ export function urlNelTesto(testo: string, comando = ''): string[] {
   const visti = new Set<string>()
   for (const [grezzo] of testo.replace(ANSI, '').matchAll(RE_URL)) {
     const url = grezzo.replace(/[.,;:!?'"]+$/, '')
-    if (!comando.includes(url) && !/\/pull\/new\//.test(url)) visti.add(url)
+    if (!comando.includes(url) && !/\/pull\/new\//.test(url) && !IDENTIFICATORI.test(url)) visti.add(url)
     if (visti.size === MAX_URL) break
   }
   return [...visti]
