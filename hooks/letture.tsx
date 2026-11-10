@@ -1,7 +1,7 @@
 import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, On, RenderElement, RenderInput } from 'claude-code'
 
-import { apri, notaMosaic } from './apri'
+import { MAX_PER_NOTA, apri, notaMosaic } from './apri'
 import { NOMI_EDITOR, apriInEditor, editorPer, rigaModificata } from './editor'
 import { type Size, fitCells, pngSize } from './layout'
 import { lavoroAvviato } from './lavori'
@@ -49,10 +49,19 @@ const RISPOSTA_CODEX = /(^|[\\/])last-message\.md$/i
 // che Claude poi rilegge con Read ha il link una volta sola, se le due chiamate stanno nella stessa riga.
 const ESTENSIONI_PRODOTTI = 'pdf|docx?|xlsx|xlsm|xls|pptx?|odt|ods|odp|rtf|epub|md|markdown|txt|csv|tsv|html?|svg|png|jpe?g|gif|webp'
 // Niente * e ? nei percorsi: `ls *.png` non cita un file.
-const PERCORSO_PRODOTTO = new RegExp(
-  `"([^"*?]+\\.(?:${ESTENSIONI_PRODOTTI}))"|'([^'*?]+\\.(?:${ESTENSIONI_PRODOTTI}))'|([^\\s"'<>|;&()=,*?]+\\.(?:${ESTENSIONI_PRODOTTI}))(?![\\w.])`,
-  'gi',
-)
+function regexPercorsi(estensioni: string): RegExp {
+  return new RegExp(
+    `"([^"*?]+\\.(?:${estensioni}))"|'([^'*?]+\\.(?:${estensioni}))'|([^\\s"'<>|;&()=,*?]+\\.(?:${estensioni}))(?![\\w.])`,
+    'gi',
+  )
+}
+const PERCORSO_PRODOTTO = regexPercorsi(ESTENSIONI_PRODOTTI)
+
+// L'elenco viene dall'ambiente e finisce in una regex: passano solo nomi di estensione semplici.
+function regexImmaginiMosaic(estensioni: string): RegExp | null {
+  const valide = estensioni.split(',').map(e => e.trim()).filter(e => /^[a-z0-9]+$/i.test(e))
+  return valide.length ? regexPercorsi(valide.join('|')) : null
+}
 // Margine per i file system che arrotondano l'ora di modifica (FAT, SMB) e per un orologio che salta di poco.
 const TOLLERANZA_MS = 2000
 const MAX_PERCORSI_OUTPUT = 3
@@ -75,9 +84,9 @@ function percorsoInput(chiamata: Chiamata): string | null {
 }
 
 /** I percorsi di documenti citati in un comando, nell'ordine e senza doppioni; esistano o no. */
-export function percorsiNelComando(comando: string): string[] {
+export function percorsiNelComando(comando: string, regex = PERCORSO_PRODOTTO): string[] {
   const visti = new Set<string>()
-  for (const m of comando.matchAll(PERCORSO_PRODOTTO)) visti.add((m[1] ?? m[2] ?? m[3])!)
+  for (const m of comando.matchAll(regex)) visti.add((m[1] ?? m[2] ?? m[3])!)
   return [...visti]
 }
 
@@ -311,9 +320,16 @@ async function conLink(
 // Un percorso composto mentre il comando gira (`'shot-' + (Get-Date ...) + '.png'`) non si legge nel comando:
 // si legge nell'output, dove lo script lo stampa. Non da chi stampa file, e non più di qualche percorso,
 // così un `ls` di una cartella appena riempita non diventa una fila di link.
-async function cercaProdotti($: EngineInterface, comando: string, output: string, inizio: number): Promise<string[]> {
-  const dallOutput = stampaFile(comando) ? [] : percorsiNelComando(output).slice(0, MAX_PERCORSI_OUTPUT)
-  const citati = [...percorsiNelComando(comando), ...dallOutput]
+async function cercaProdotti(
+  $: EngineInterface,
+  comando: string,
+  output: string,
+  inizio: number,
+  regex = PERCORSO_PRODOTTO,
+  maxDallOutput = MAX_PERCORSI_OUTPUT,
+): Promise<string[]> {
+  const dallOutput = stampaFile(comando) ? [] : percorsiNelComando(output, regex).slice(0, maxDallOutput)
+  const citati = [...percorsiNelComando(comando, regex), ...dallOutput]
   if (!citati.length) return []
   const cwd = await $.session.cwd()
   const visti = new Set<string>()
@@ -411,7 +427,10 @@ async function conTrovati<R>(
         const prodotti = await cercaProdotti($, comando, testo, inizio)
         const url = urlNelTesto(testo, comando)
         if (prodotti.length || url.length) await aggiungiTrovati($, id, { prodotti, url })
-        notaMosaic($, 'made', prodotti)
+        notaMosaic($, 'made', estensioni => {
+          const regex = regexImmaginiMosaic(estensioni)
+          return regex ? cercaProdotti($, comando, testo, inizio, regex, MAX_PER_NOTA) : []
+        })
       }
     }
   } catch {
@@ -434,7 +453,7 @@ export function registraLetture(on: On, anteprima: Promise<Anteprima> | null, op
     try {
       if (!('result' in esito) || esito.isError) return esito
       const chiamata = { tool: 'Read', tool_use_id: e.tool_use_id, input: e, output: esito.result }
-      if (immagineLetta(chiamata)) notaMosaic($, 'read', [e.file_path])
+      if (immagineLetta(chiamata)) notaMosaic($, 'read', () => [e.file_path])
       if (anteprima && daAprire(chiamata).length) percorsi.set(e.tool_use_id, e.file_path)
     } catch {
       // Link e nota sono un di più: un loro errore non deve mai toccare il risultato della lettura.

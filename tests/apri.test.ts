@@ -103,7 +103,7 @@ const PNG_LETTO = { type: 'image', file: { base64: 'iVBORw0KGgo', type: 'image/p
 
 // La nota parte senza che nessuno la aspetti: si lasciano girare le promesse in coda prima di guardare.
 async function svuota() {
-  for (let i = 0; i < 200; i++) await Promise.resolve()
+  for (let i = 0; i < 5000; i++) await Promise.resolve()
 }
 
 test('la nota a Mosaic chiede le due variabili, tiene solo le estensioni accettate e al massimo 50 percorsi', () => {
@@ -165,22 +165,72 @@ test('se Mosaic rifiuta la nota o non parte, la lettura resta quella e non compa
   expect(avvisi).toEqual([])
 })
 
-test('un comando che crea immagini manda una nota sola con quelle, non con gli altri file', { options: { anteprime: 'no' } }, async ($, on) => {
-  const o = ospite(on)
+async function comandoCheCrea(on: On, o: ReturnType<typeof ospite>, creati: string[], stdout = '') {
   await o.clock.advance(1_000_000)
   const ora = o.clock.now()
-  const creati = ['V:/Temp/shot-1.png', 'V:/Temp/shot-2.jpg', 'V:/Temp/report.pdf']
+  const lette: string[] = []
   on('session.cwd', () => ({ value: 'V:/Temp' }))
-  on('fs.stat', ($, e) =>
-    creati.includes(e.path.replaceAll('\\', '/'))
-      ? { value: { kind: 'file', size: 10, mtimeMs: ora + 500, isLink: false } }
-      : { deny: 'ENOENT' },
-  )
-  const risultato = { stdout: '', stderr: '', interrupted: false }
+  on('fs.stat', ($, e) => {
+    const path = e.path.replaceAll('\\', '/')
+    lette.push(path)
+    return creati.includes(path) ? { value: { kind: 'file', size: 10, mtimeMs: ora + 500, isLink: false } } : { deny: 'ENOENT' }
+  })
+  const risultato = { stdout, stderr: '', interrupted: false }
   on('tool.call', () => ({ result: risultato }))
+  return { risultato, lette }
+}
+
+function nota(...paths: string[]) {
+  return { argv: [CLI, 'preview', '--note', 'made', ...paths], timeoutMs: 3000 }
+}
+
+test('un comando che crea immagini manda una nota sola con quelle, non con gli altri file', { options: { anteprime: 'no' } }, async ($, on) => {
+  const o = ospite(on)
+  const creati = ['V:/Temp/shot-1.png', 'V:/Temp/shot-2.jpg', 'V:/Temp/report.pdf']
+  const { risultato } = await comandoCheCrea(on, o, creati)
   const esito = await $.tool.call({ tool: 'PowerShell', command: `python grafici.py ${creati.join(' ')}`, tool_use_id: 'p1' } as never)
   expect(esito).toMatchObject({ result: risultato })
   await $.tool.call({ tool: 'Bash', command: 'git status', tool_use_id: 'b1' } as never)
   await svuota()
-  expect(o.comandi).toEqual([{ argv: [CLI, 'preview', '--note', 'made', 'V:/Temp/shot-1.png', 'V:/Temp/shot-2.jpg'], timeoutMs: 3000 }])
+  expect(o.comandi).toEqual([nota('V:/Temp/shot-1.png', 'V:/Temp/shot-2.jpg')])
+})
+
+test('la nota prende le estensioni di Mosaic, anche quelle che non hanno un link', { options: { anteprime: 'no' } }, async ($, on) => {
+  const o = ospite(on)
+  await comandoCheCrea(on, o, ['V:/Temp/shot.bmp'])
+  await $.tool.call({ tool: 'PowerShell', command: 'magick schema.svg V:/Temp/shot.bmp', tool_use_id: 'p1' } as never)
+  await svuota()
+  expect(o.comandi).toEqual([nota('V:/Temp/shot.bmp')])
+})
+
+const COMPOSTO = `1..4 | % { $p = "V:/Temp/shot-$_-" + (Get-Date -Format 'HHmmss') + '.png'; $bmp.Save($p); $p }`
+
+test("un'immagine stampata da uno script arriva nella nota anche oltre i tre link e dopo i documenti", { options: { anteprime: 'immagini' } }, async ($, on) => {
+  const o = ospite(on)
+  const shot = [1, 2, 3, 4].map(i => `V:/Temp/shot-${i}-101500.png`)
+  const documenti = ['V:/Temp/a.pdf', 'V:/Temp/b.docx', 'V:/Temp/c.xlsx']
+  await comandoCheCrea(on, o, [...shot, ...documenti], [...documenti, ...shot].join('\r\n'))
+  await $.tool.call({ tool: 'PowerShell', command: COMPOSTO, tool_use_id: 'p1' } as never)
+  await svuota()
+  expect(o.comandi).toEqual([nota(...shot)])
+
+  const ui = await $.ui.mount({
+    plugin: 'infobar',
+    component: 'ToolResult',
+    surface: 'terminal',
+    viewport: { columns: 120, rows: 40 },
+    props: { tool_use_id: 'p1', tool: 'PowerShell', output: { stdout: '' }, isErrored: false },
+  } as never)
+  expect((await ui.findAll({ type: 'Button' })).map(b => b.key)).toEqual(['apri-p1-0', 'apri-p1-1', 'apri-p1-2'])
+  expect(await ui.find({ type: 'Text', text: 'a.pdf' })).toBeDefined()
+})
+
+test('senza MOSAICMANAGER_PREVIEW_NOTES un comando legge il disco come sempre e non avvia processi', { options: { anteprime: 'no' } }, async ($, on) => {
+  const o = ospite(on)
+  delete o.env.MOSAICMANAGER_PREVIEW_NOTES
+  const { lette } = await comandoCheCrea(on, o, ['V:/Temp/shot.png', 'V:/Temp/shot.bmp'])
+  await $.tool.call({ tool: 'PowerShell', command: 'python cattura.py V:/Temp/shot.png V:/Temp/shot.bmp', tool_use_id: 'p1' } as never)
+  await svuota()
+  expect(lette).toEqual(['V:/Temp/shot.png'])
+  expect(o.comandi).toEqual([])
 })

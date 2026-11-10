@@ -32,7 +32,7 @@ function accettataDaMosaic(estensioni: string, path: string): boolean {
   return !!estensione && estensioni.split(',').some(e => e.trim() === estensione)
 }
 
-const MAX_PER_NOTA = 50
+export const MAX_PER_NOTA = 50
 
 // Un Mosaic che non imposta MOSAICMANAGER_PREVIEW_NOTES non conosce --note.
 export function comandoNotaMosaic(
@@ -48,17 +48,17 @@ export function comandoNotaMosaic(
 }
 
 // Mai atteso: chi chiama restituisce il risultato del tool senza aspettare Mosaic, e un suo errore non arriva a nessuno.
-export function notaMosaic($: EngineInterface, tipo: 'read' | 'made', paths: readonly string[]) {
-  if (!paths.length) return
+// `trova` gira solo se la nota si può mandare: fuori da Mosaic nessun lavoro in più.
+export function notaMosaic($: EngineInterface, tipo: 'read' | 'made', trova: (estensioni: string) => readonly string[] | Promise<readonly string[]>) {
   void (async () => {
     const [cli, note, estensioni] = await Promise.all([
       $.env.get('MOSAICMANAGER_CLI'),
       $.env.get('MOSAICMANAGER_PREVIEW_NOTES'),
       $.env.get('MOSAICMANAGER_PREVIEW'),
     ])
-    const argv = comandoNotaMosaic(cli, note, estensioni, tipo, paths)
-    if (!argv || !(await $.session.surfaces()).includes('terminal')) return
-    await $.process.run(argv, { timeoutMs: 3000 })
+    if (!cli || !note || !estensioni || !(await $.session.surfaces()).includes('terminal')) return
+    const argv = comandoNotaMosaic(cli, note, estensioni, tipo, await trova(estensioni))
+    if (argv) await $.process.run(argv, { timeoutMs: 3000 })
   })().catch(() => undefined)
 }
 
