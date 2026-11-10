@@ -526,7 +526,7 @@ function inviato(id: string, text: string, kind = 'composer') {
   } as never
 }
 
-test('sotto il messaggio inviato ogni immagine trovata ha un link che la apre', { options: { anteprime: 'immagini' } }, async ($, on) => {
+test('sotto il messaggio inviato ogni immagine trovata ha la miniatura e il link che la apre', { options: { anteprime: 'immagini' } }, async ($, on) => {
   const clock = mock.clock(on)
   const cartella = 'C:/Users/me/AppData/Local/Temp/claude/C--work-inviate/sess-1/images'
   const o = ospite(on, {
@@ -539,11 +539,35 @@ test('sotto il messaggio inviato ogni immagine trovata ha un link che la apre', 
   await (await $.ui.mount(inviato('u1', 'guarda [Image #1] e [Image #3]'))).unmount()
   await clock.advance(100)
 
+  await (await $.ui.mount(inviato('u1', 'guarda [Image #1] e [Image #3]'))).unmount()
+  await clock.advance(100)
+
   const ui = await $.ui.mount(inviato('u1', 'guarda [Image #1] e [Image #3]'))
   expect(await ui.find({ type: 'Text', text: 'banda del motore' })).toBeDefined()
-  expect((await ui.findAll({ type: 'Button' })).map(b => b.key)).toEqual(['inviata-1'])
-  await ui.press({ key: 'inviata-1' })
+  const { rgba } = (await ui.find({ type: 'Image' }))?.props.source as { rgba: string }
+  expect([...fromBase64(rgba).subarray(0, 4)]).toEqual(ROSSO)
+  expect(await ui.find({ type: 'Text', text: 'Image #1' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Button' })).map(b => b.key)).toEqual(['apri-u1-1'])
+  await ui.press({ key: 'apri-u1-1' })
   expect(o.comandi).toEqual([['explorer.exe', `${cartella.replaceAll('/', '\\')}\\1.png`]])
+})
+
+test('a blocchi il messaggio inviato ha il solo link, come le immagini lette', { options: { anteprime: 'blocchi' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const cartella = 'C:/Users/me/AppData/Local/Temp/claude/C--work-blocchi/sess-1/images'
+  ospite(on, {
+    env: { OS: 'Windows_NT', TEMP: 'C:\\Users\\me\\AppData\\Local\\Temp' },
+    root: 'C:\\work\\blocchi',
+    file: { [`${cartella}/1.png`]: ROSSO_SU_BLU },
+    bozza: '',
+  })
+  for (let i = 0; i < 2; i++) {
+    await (await $.ui.mount(inviato('u1', 'guarda [Image #1]'))).unmount()
+    await clock.advance(100)
+  }
+  const ui = await $.ui.mount(inviato('u1', 'guarda [Image #1]'))
+  expect(await ui.find({ type: 'Raster' })).toBeUndefined()
+  expect((await ui.findAll({ type: 'Button' })).map(b => b.key)).toEqual(['apri-u1-1'])
 })
 
 test('niente link sotto una notifica, un messaggio senza immagini o con le anteprime spente', { options: { anteprime: 'no' } }, async ($, on) => {
@@ -566,12 +590,12 @@ test('una notifica che cita un tag non ha link', { options: { anteprime: 'immagi
   const cartella = 'C:/Users/me/AppData/Local/Temp/claude/C--work-notifica/sess-1/images'
   ospite(on, {
     env: { OS: 'Windows_NT', TEMP: 'C:\\Users\\me\\AppData\\Local\\Temp' },
-    root: 'C:\\work\notifica',
+    root: 'C:\\work\\notifica',
     file: { [`${cartella}/1.png`]: ROSSO_SU_BLU },
     bozza: '',
   })
   await (await $.ui.mount(inviato('n1', 'finito [Image #1]', 'task-notification'))).unmount()
   await clock.advance(100)
   const ui = await $.ui.mount(inviato('n1', 'finito [Image #1]', 'task-notification'))
-  expect((await ui.findAll({ type: 'Button' })).filter(b => b.key?.startsWith('inviata-'))).toEqual([])
+  expect((await ui.findAll({ type: 'Button' })).filter(b => b.key?.startsWith('apri-n1'))).toEqual([])
 })

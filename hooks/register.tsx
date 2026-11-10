@@ -36,7 +36,7 @@ import { registraCompatte, registraFalliti, registraRisposte } from './compatte'
 import { registraCopia, rispostaFinita } from './copia'
 import { EXTENSIONS, type Format, decodeImage, formatOf, imageSize } from './formati'
 import { fitRow, imageNumbers } from './layout'
-import { type Anteprima, registraLetture } from './letture'
+import { type Anteprima, type Link, type Opzioni, conLink, registraLetture } from './letture'
 import { fromBase64, rasterCells, toBase64 } from './raster'
 import {
   AUTONOMO,
@@ -542,7 +542,8 @@ function cercaInviate($: EngineInterface, requestId: string, numeri: number[]) {
   })
 }
 
-function registraInviate(on: Parameters<Register>[0]) {
+// Come le immagini lette: miniatura sopra il link dove il terminale disegna immagini (Mosaic compreso), altrimenti il solo link.
+function registraInviate(on: Parameters<Register>[0], opzioni: Opzioni) {
   on('ui.render', { component: 'UserMessage', surface: 'terminal' }, async ($, e, next) => {
     const sopra = await next(e)
     if (!ORIGINI_PERSONA.has(e.props.origin.kind) || e.props.from) return sopra
@@ -551,20 +552,12 @@ function registraInviate(on: Parameters<Register>[0]) {
     const trovate = await read($, memberOf(inviate, { requestId: e.requestId }))
     if (trovate === null) cercaInviate($, e.requestId, numeri)
     if (!trovate?.length) return sopra
-    const { Box, Button, Text } = $.ui.resolve(e)
-    return (
-      <Box flexDirection="column">
-        {sopra}
-        <Box flexDirection="row" flexWrap="wrap" columnGap={2} paddingLeft={2}>
-          {trovate.map(({ n, path }) => (
-            <Button key={`inviata-${n}`} plain onPress={() => apri($, path)}>
-              <Text color="cyan" bold>↗ </Text>
-              <Text color="cyan">{`Image #${n}`}</Text>
-            </Button>
-          ))}
-        </Box>
-      </Box>
-    )
+    const links = trovate.map(({ n, path }): Link => {
+      const formato = EXTENSIONS[path.split('.').pop()!.toLowerCase()]
+      const link: Link = { id: `${e.requestId}-${n}`, tipo: 'file', destinazione: path, png: null, size: null, etichetta: `Image #${n}` }
+      return formato && formato !== 'webp' ? { ...link, dati: { path, formato } } : link
+    })
+    return conLink($, e, sopra, links, await anteprima, opzioni)
   })
 }
 
@@ -574,16 +567,17 @@ export const register: Register = (on, options) => {
   const conAccount = options.account !== 'no'
   const conCodex = options.codex !== 'no'
   if (scelta === 'immagini' || scelta === 'blocchi' || scelta === 'etichette') fissaAnteprima(scelta)
-  registraLetture(on, conAnteprime ? anteprima : null, {
+  const opzioniLink: Opzioni = {
     editor: typeof options.editor === 'string' ? options.editor : undefined,
     miniatureLette: options.miniatureLette === 'si',
-  })
+  }
+  registraLetture(on, conAnteprime ? anteprima : null, opzioniLink)
   // Dopo i link: registrato più tardi sta sotto, e i link restano sotto la riga compatta.
   if (options.modificheCompatte !== 'no') registraCompatte(on)
   registraFalliti(on)
   registraRisposte(on)
   // Prima dei messaggi: registrato prima sta fuori, e i link restano sotto anche la riga accesa dal pannello Messaggi.
-  if (conAnteprime) registraInviate(on)
+  if (conAnteprime) registraInviate(on, opzioniLink)
   registraMessaggi(on)
   registraPannelli(on)
   if (options.copia !== 'no') registraCopia(on, options.copia === 'hover' ? 'hover' : 'sempre')

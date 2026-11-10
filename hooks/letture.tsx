@@ -31,6 +31,8 @@ export type Link = {
   size: Size | null
   /** Da dove decodificare la miniatura: i byte che ha visto Claude, o il file che un comando ha creato. */
   dati?: Dati
+  /** Al posto del nome del file: `Image #1` per un'immagine incollata, il cui file si chiama `1.png`. */
+  etichetta?: string
 }
 
 type Chiamata = { tool: string; tool_use_id?: string; input: unknown; output?: unknown; isErrored?: boolean }
@@ -203,11 +205,11 @@ function nomeFile(path: string | null): string {
   return path?.split(/[\\/]/).pop() || 'immagine'
 }
 
-type Opzioni = { editor?: string; miniatureLette?: boolean }
+export type Opzioni = { editor?: string; miniatureLette?: boolean }
 
-async function conLink(
+export async function conLink(
   $: EngineInterface,
-  e: RenderInput<'ToolGroup' | 'ToolResult'>,
+  e: RenderInput<'ToolGroup' | 'ToolResult' | 'UserMessage'>,
   sopra: RenderElement,
   links: Link[],
   modo: Anteprima | null,
@@ -220,7 +222,7 @@ async function conLink(
     const { destinazione: dove } = link
     if (!dove) return <Text dimColor>{accorcia(nomeFile(dove), maxNome)}</Text>
     let verbo = ''
-    let testo = accorcia(nomeFile(dove), maxNome)
+    let testo = accorcia(link.etichetta ?? nomeFile(dove), maxNome)
     let azione = () => apri($, dove)
     if (link.tipo === 'url') {
       testo = etichettaUrl(dove)
