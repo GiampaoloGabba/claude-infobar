@@ -485,3 +485,93 @@ test('a etichette restano solo i tag cliccabili e i file non si leggono', { opti
   await ui.press({ key: 'apri-1' })
   expect(o.comandi).toEqual([['explorer.exe', `${cartella.replaceAll('/', '\\')}\\1.png`]])
 })
+
+const MOSAIC = 'C:\\Program Files\\Mosaic\\mosaic.exe'
+
+test("in Mosaic un'immagine incollata va all'Anteprima appena compare, una volta sola", { options: { anteprime: 'immagini' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const cartella = 'C:/Users/me/AppData/Local/Temp/claude/C--work-incolla/sess-1/images'
+  const o = ospite(on, {
+    env: { OS: 'Windows_NT', TEMP: 'C:\\Users\\me\\AppData\\Local\\Temp', MOSAICMANAGER_CLI: MOSAIC, MOSAICMANAGER_PREVIEW: 'png,jpg', MOSAICMANAGER_PREVIEW_NOTES: '1' },
+    root: 'C:\\work\\incolla',
+    file: { [`${cartella}/1.png`]: ROSSO_SU_BLU, [`${cartella}/2.jpg`]: JPEG_BASELINE },
+    bozza: 'guarda [Image #1]',
+  })
+  on('session.surfaces', () => ({ value: ['terminal'] }) as never)
+  const note = () => o.comandi.filter(c => c[0] === MOSAIC)
+
+  await (await $.ui.mount({ ...SUGGERIMENTO, surface: 'terminal' })).unmount()
+  await clock.advance(100)
+  o.bozza = 'guarda [Image #1] e anche'
+  await (await $.ui.mount({ ...SUGGERIMENTO, surface: 'terminal' })).unmount()
+  await clock.advance(100)
+  o.bozza = 'guarda [Image #1] e anche [Image #2]'
+  await (await $.ui.mount({ ...SUGGERIMENTO, surface: 'terminal' })).unmount()
+  await clock.advance(100)
+
+  expect(note()).toEqual([
+    [MOSAIC, 'preview', '--note', 'pasted', `${cartella}/1.png`],
+    [MOSAIC, 'preview', '--note', 'pasted', `${cartella}/2.jpg`],
+  ])
+})
+
+function inviato(id: string, text: string, kind = 'composer') {
+  return {
+    plugin: 'infobar',
+    component: 'UserMessage',
+    surface: 'terminal',
+    requestId: id,
+    viewport: { columns: 120, rows: 40 },
+    props: { text, origin: { kind }, isExpanded: true },
+  } as never
+}
+
+test('sotto il messaggio inviato ogni immagine trovata ha un link che la apre', { options: { anteprime: 'immagini' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const cartella = 'C:/Users/me/AppData/Local/Temp/claude/C--work-inviate/sess-1/images'
+  const o = ospite(on, {
+    env: { OS: 'Windows_NT', TEMP: 'C:\\Users\\me\\AppData\\Local\\Temp' },
+    root: 'C:\\work\\inviate',
+    file: { [`${cartella}/1.png`]: ROSSO_SU_BLU, [`${cartella}/2.png`]: ROSSO_SU_BLU },
+    bozza: '',
+  })
+
+  await (await $.ui.mount(inviato('u1', 'guarda [Image #1] e [Image #3]'))).unmount()
+  await clock.advance(100)
+
+  const ui = await $.ui.mount(inviato('u1', 'guarda [Image #1] e [Image #3]'))
+  expect(await ui.find({ type: 'Text', text: 'banda del motore' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Button' })).map(b => b.key)).toEqual(['inviata-1'])
+  await ui.press({ key: 'inviata-1' })
+  expect(o.comandi).toEqual([['explorer.exe', `${cartella.replaceAll('/', '\\')}\\1.png`]])
+})
+
+test('niente link sotto una notifica, un messaggio senza immagini o con le anteprime spente', { options: { anteprime: 'no' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const cartella = 'C:/Users/me/AppData/Local/Temp/claude/C--work-spente/sess-1/images'
+  ospite(on, {
+    env: { OS: 'Windows_NT', TEMP: 'C:\\Users\\me\\AppData\\Local\\Temp' },
+    root: 'C:\\work\\spente',
+    file: { [`${cartella}/1.png`]: ROSSO_SU_BLU },
+    bozza: '',
+  })
+  await (await $.ui.mount(inviato('u1', 'guarda [Image #1]'))).unmount()
+  await clock.advance(100)
+  const ui = await $.ui.mount(inviato('u1', 'guarda [Image #1]'))
+  expect(await ui.findAll({ type: 'Button' })).toEqual([])
+})
+
+test('una notifica che cita un tag non ha link', { options: { anteprime: 'immagini' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const cartella = 'C:/Users/me/AppData/Local/Temp/claude/C--work-notifica/sess-1/images'
+  ospite(on, {
+    env: { OS: 'Windows_NT', TEMP: 'C:\\Users\\me\\AppData\\Local\\Temp' },
+    root: 'C:\\work\notifica',
+    file: { [`${cartella}/1.png`]: ROSSO_SU_BLU },
+    bozza: '',
+  })
+  await (await $.ui.mount(inviato('n1', 'finito [Image #1]', 'task-notification'))).unmount()
+  await clock.advance(100)
+  const ui = await $.ui.mount(inviato('n1', 'finito [Image #1]', 'task-notification'))
+  expect((await ui.findAll({ type: 'Button' })).filter(b => b.key?.startsWith('inviata-'))).toEqual([])
+})

@@ -39,7 +39,7 @@ export function comandoNotaMosaic(
   cli: string | undefined,
   note: string | undefined,
   estensioni: string | undefined,
-  tipo: 'read' | 'made',
+  tipo: 'read' | 'made' | 'pasted',
   paths: readonly string[],
 ): string[] | null {
   if (!cli || !note || !estensioni) return null
@@ -49,7 +49,7 @@ export function comandoNotaMosaic(
 
 // Mai atteso: chi chiama restituisce il risultato del tool senza aspettare Mosaic, e un suo errore non arriva a nessuno.
 // `trova` gira solo se la nota si può mandare: fuori da Mosaic nessun lavoro in più.
-export function notaMosaic($: EngineInterface, tipo: 'read' | 'made', trova: (estensioni: string) => readonly string[] | Promise<readonly string[]>) {
+export function notaMosaic($: EngineInterface, tipo: 'read' | 'made' | 'pasted', trova: (estensioni: string) => readonly string[] | Promise<readonly string[]>) {
   void (async () => {
     const [cli, note, estensioni] = await Promise.all([
       $.env.get('MOSAICMANAGER_CLI'),

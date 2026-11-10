@@ -1,4 +1,4 @@
-import { atom, read, update } from 'claude-code'
+import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, FsEntry, RenderInput, Register, SessionContextUsage, SessionRateLimit, Timer } from 'claude-code'
 
 import type { ImmagineIncollata, Ripresa } from '../types'
@@ -15,7 +15,7 @@ import {
   larghezzaConto,
   pulsanteConto,
 } from './account'
-import { apri } from './apri'
+import { apri, notaMosaic } from './apri'
 import { PANNELLO_LAVORI, apriLavori, attivitaInCorso, disegnaLavori, lavoriDaAgenti, lavoriDaRiepilogo, lavoriInCorso, lavoroDaNotifica, lavoroFermato } from './lavori'
 import { alterna, registraPannelli } from './pannelli'
 import { PANNELLO_MESSAGGI, apriMessaggi, messaggioInviato, nuovaSessioneMessaggi, quantiMessaggi, registraMessaggi } from './messaggi'
@@ -267,6 +267,8 @@ let inAttesa: { bozza: string; ritenta: boolean } | undefined
 let sincronizzando = false
 // Per `<cartella>/<n>`, così ogni immagine si cerca, si legge e si decodifica una volta sola.
 const descritte = new Map<string, Omit<ImmagineIncollata, 'n'>>()
+// Una nota per immagine: il prompt si rilegge a ogni tasto, e Mosaic segnerebbe di nuovo come da vedere un'immagine già annotata.
+const annunciate = new Set<string>()
 // Senza bytes, un PNG oltre i 4 MiB che si legge con un processo figlio quando tocca a lui.
 const daDecodificare = new Map<string, { n: number; bytes?: Uint8Array; formato: Format; path: string }>()
 let decodificando = false
@@ -398,6 +400,11 @@ async function mostra($: EngineInterface, bozza: string, ritenta: boolean) {
   // Una decodifica finita durante le letture qui sopra ha già pubblicato la sua miniatura: la copia in `lista` è vecchia.
   await update($, immagini, () => lista.map(i => ({ ...i, ...descritte.get(`${cartella}/${i.n}`) })))
   decodificaInSeguito($)
+  const nuove = lista.flatMap(i => (i.path !== null && !annunciate.has(i.path) ? [i.path] : []))
+  if (nuove.length) {
+    for (const path of nuove) annunciate.add(path)
+    notaMosaic($, 'pasted', () => nuove)
+  }
 
   if (lista.every(immagine => immagine.path !== null)) {
     chiaveMostrata = chiave
@@ -514,6 +521,53 @@ async function rigaImmagini($: EngineInterface, e: RenderInput<'AbovePrompt'>) {
   )
 }
 
+// Dopo l'invio Claude Code lascia solo il tag `[Image #n]`, che col clic non apre niente: sotto il messaggio un link per immagine.
+const inviate = atom({ plugin: 'infobar', key: 'immaginiInviate' } as const, null as { n: number; path: string }[] | null)
+const cercateInviate = new Set<string>()
+const ORIGINI_PERSONA = new Set(['composer', 'bridge', 'unclassified'])
+
+// Fuori dal disegno, su un timer: la cartella si legge solo se l'incolla non l'ha già descritta.
+function cercaInviate($: EngineInterface, requestId: string, numeri: number[]) {
+  if (cercateInviate.has(requestId)) return
+  cercateInviate.add(requestId)
+  $.clock.after(0, async () => {
+    const dove = await cartellaImmagini($).catch(() => undefined)
+    const daCercare = dove !== undefined && numeri.some(n => !descritte.get(`${dove}/${n}`)?.path)
+    const file = daCercare ? await fileImmagini($, dove) : new Map<number, FsEntry>()
+    const trovate = numeri.flatMap(n => {
+      const path = descritte.get(`${dove}/${n}`)?.path ?? (file.has(n) ? `${dove}/${file.get(n)!.name}` : null)
+      return path ? [{ n, path }] : []
+    })
+    await update($, memberOf(inviate, { requestId }), () => trovate)
+  })
+}
+
+function registraInviate(on: Parameters<Register>[0]) {
+  on('ui.render', { component: 'UserMessage', surface: 'terminal' }, async ($, e, next) => {
+    const sopra = await next(e)
+    if (!ORIGINI_PERSONA.has(e.props.origin.kind) || e.props.from) return sopra
+    const numeri = imageNumbers(e.props.text)
+    if (!numeri.length) return sopra
+    const trovate = await read($, memberOf(inviate, { requestId: e.requestId }))
+    if (trovate === null) cercaInviate($, e.requestId, numeri)
+    if (!trovate?.length) return sopra
+    const { Box, Button, Text } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        {sopra}
+        <Box flexDirection="row" flexWrap="wrap" columnGap={2} paddingLeft={2}>
+          {trovate.map(({ n, path }) => (
+            <Button key={`inviata-${n}`} plain onPress={() => apri($, path)}>
+              <Text color="cyan" bold>↗ </Text>
+              <Text color="cyan">{`Image #${n}`}</Text>
+            </Button>
+          ))}
+        </Box>
+      </Box>
+    )
+  })
+}
+
 export const register: Register = (on, options) => {
   const scelta = options.anteprime
   const conAnteprime = scelta !== 'no'
@@ -528,6 +582,8 @@ export const register: Register = (on, options) => {
   if (options.modificheCompatte !== 'no') registraCompatte(on)
   registraFalliti(on)
   registraRisposte(on)
+  // Prima dei messaggi: registrato prima sta fuori, e i link restano sotto anche la riga accesa dal pannello Messaggi.
+  if (conAnteprime) registraInviate(on)
   registraMessaggi(on)
   registraPannelli(on)
   if (options.copia !== 'no') registraCopia(on, options.copia === 'hover' ? 'hover' : 'sempre')
