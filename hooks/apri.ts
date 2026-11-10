@@ -17,8 +17,28 @@ export async function apriTesto($: EngineInterface, path: string) {
   if (esito instanceof Error) $.ui.toast(`Non riesco ad aprire ${path}: ${esito.message}`)
 }
 
+// Solo dentro un terminale di Mosaic Manager e per le estensioni che la sua Anteprima accetta: gli altri clic
+// non devono avviare un processo in più.
+export function comandoAnteprimaMosaic(cli: string | undefined, estensioni: string | undefined, path: string): string[] | null {
+  if (!cli || !estensioni) return null
+  const nome = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
+  const punto = nome.lastIndexOf('.')
+  if (punto < 0) return null
+  const estensione = nome.slice(punto + 1).toLowerCase()
+  if (!estensione || !estensioni.split(',').some(e => e.trim() === estensione)) return null
+  return [cli, 'preview', path]
+}
+
+async function anteprimaMosaic($: EngineInterface, path: string): Promise<boolean> {
+  const argv = comandoAnteprimaMosaic(await $.env.get('MOSAICMANAGER_CLI'), await $.env.get('MOSAICMANAGER_PREVIEW'), path)
+  if (!argv) return false
+  const esito = await $.process.run(argv, { timeoutMs: 3000 }).catch(() => null)
+  return esito?.exitCode === 0
+}
+
 // Apre l'immagine con il visualizzatore predefinito; explorer.exe esce con 1 anche quando l'ha aperta.
 export async function apri($: EngineInterface, path: string) {
+  if (await anteprimaMosaic($, path)) return
   const esito = await comandoApertura($, path)
     .then(argv => $.process.run(argv))
     .catch((errore: unknown) => errore)
