@@ -1,7 +1,7 @@
 import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, On, RenderElement, RenderInput } from 'claude-code'
 
-import { apri } from './apri'
+import { apri, notaMosaic } from './apri'
 import { NOMI_EDITOR, apriInEditor, editorPer, rigaModificata } from './editor'
 import { type Size, fitCells, pngSize } from './layout'
 import { lavoroAvviato } from './lavori'
@@ -411,6 +411,7 @@ async function conTrovati<R>(
         const prodotti = await cercaProdotti($, comando, testo, inizio)
         const url = urlNelTesto(testo, comando)
         if (prodotti.length || url.length) await aggiungiTrovati($, id, { prodotti, url })
+        notaMosaic($, 'made', prodotti)
       }
     }
   } catch {
@@ -428,17 +429,18 @@ export function registraLetture(on: On, anteprima: Promise<Anteprima> | null, op
   // Si aspetta la scelta del disegno solo se c'è un'immagine da disegnare: i soli link non ne dipendono.
   const modo = async (links: Link[]) => (anteprima && links.some(l => l.png || l.dati) ? await anteprima : null)
 
-  if (anteprima)
-    on('tool.call', { tool: 'Read' }, async ($, e, next) => {
-      const esito = await next(e)
-      try {
-        if ('result' in esito && !esito.isError && daAprire({ tool: 'Read', tool_use_id: e.tool_use_id, input: e, output: esito.result }).length)
-          percorsi.set(e.tool_use_id, e.file_path)
-      } catch {
-        // Il link è un di più: un suo errore non deve mai toccare il risultato della lettura.
-      }
-      return esito
-    })
+  on('tool.call', { tool: 'Read' }, async ($, e, next) => {
+    const esito = await next(e)
+    try {
+      if (!('result' in esito) || esito.isError) return esito
+      const chiamata = { tool: 'Read', tool_use_id: e.tool_use_id, input: e, output: esito.result }
+      if (immagineLetta(chiamata)) notaMosaic($, 'read', [e.file_path])
+      if (anteprima && daAprire(chiamata).length) percorsi.set(e.tool_use_id, e.file_path)
+    } catch {
+      // Link e nota sono un di più: un loro errore non deve mai toccare il risultato della lettura.
+    }
+    return esito
+  })
 
   on('tool.call', { tool: 'Bash' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, e.description, e.agentId, () => next(e)))
   on('tool.call', { tool: 'PowerShell' }, ($, e, next) => conTrovati($, e.tool_use_id, e.command, e.description, e.agentId, () => next(e)))

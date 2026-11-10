@@ -20,13 +20,46 @@ export async function apriTesto($: EngineInterface, path: string) {
 // Solo dentro un terminale di Mosaic Manager e per le estensioni che la sua Anteprima accetta: gli altri clic
 // non devono avviare un processo in più.
 export function comandoAnteprimaMosaic(cli: string | undefined, estensioni: string | undefined, path: string): string[] | null {
-  if (!cli || !estensioni) return null
+  if (!cli || !estensioni || !accettataDaMosaic(estensioni, path)) return null
+  return [cli, 'preview', path]
+}
+
+function accettataDaMosaic(estensioni: string, path: string): boolean {
   const nome = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
   const punto = nome.lastIndexOf('.')
-  if (punto < 0) return null
+  if (punto < 0) return false
   const estensione = nome.slice(punto + 1).toLowerCase()
-  if (!estensione || !estensioni.split(',').some(e => e.trim() === estensione)) return null
-  return [cli, 'preview', path]
+  return !!estensione && estensioni.split(',').some(e => e.trim() === estensione)
+}
+
+const MAX_PER_NOTA = 50
+
+// Un Mosaic che non imposta MOSAICMANAGER_PREVIEW_NOTES non conosce --note.
+export function comandoNotaMosaic(
+  cli: string | undefined,
+  note: string | undefined,
+  estensioni: string | undefined,
+  tipo: 'read' | 'made',
+  paths: readonly string[],
+): string[] | null {
+  if (!cli || !note || !estensioni) return null
+  const accettati = paths.filter(path => accettataDaMosaic(estensioni, path)).slice(0, MAX_PER_NOTA)
+  return accettati.length ? [cli, 'preview', '--note', tipo, ...accettati] : null
+}
+
+// Mai atteso: chi chiama restituisce il risultato del tool senza aspettare Mosaic, e un suo errore non arriva a nessuno.
+export function notaMosaic($: EngineInterface, tipo: 'read' | 'made', paths: readonly string[]) {
+  if (!paths.length) return
+  void (async () => {
+    const [cli, note, estensioni] = await Promise.all([
+      $.env.get('MOSAICMANAGER_CLI'),
+      $.env.get('MOSAICMANAGER_PREVIEW_NOTES'),
+      $.env.get('MOSAICMANAGER_PREVIEW'),
+    ])
+    const argv = comandoNotaMosaic(cli, note, estensioni, tipo, paths)
+    if (!argv || !(await $.session.surfaces()).includes('terminal')) return
+    await $.process.run(argv, { timeoutMs: 3000 })
+  })().catch(() => undefined)
 }
 
 async function anteprimaMosaic($: EngineInterface, path: string): Promise<boolean> {

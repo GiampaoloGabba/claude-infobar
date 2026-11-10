@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { comandoAnteprimaMosaic } from '../hooks/apri'
+import { comandoAnteprimaMosaic, comandoNotaMosaic } from '../hooks/apri'
 
 const CLI = 'C:\\Program Files\\Mosaic\\mosaic.exe'
 const IMMAGINI = 'png,jpg,jpeg,gif,bmp,tif,tiff,ico,webp'
@@ -9,13 +9,21 @@ const IMMAGINI = 'png,jpg,jpeg,gif,bmp,tif,tiff,ico,webp'
 type Esito = { exitCode: number } | { deny: string }
 
 function ospite(on: On) {
-  const o = { mosaic: { exitCode: 0 } as Esito, comandi: [] as { argv: string[]; timeoutMs?: number }[] }
-  const env: Record<string, string> = { OS: 'Windows_NT', MOSAICMANAGER_CLI: CLI, MOSAICMANAGER_PREVIEW: IMMAGINI }
-  mock.clock(on)
-  on('env.get', ($, e) => ({ value: env[e.name] }))
-  on('process.run', ($, e) => {
+  const o = {
+    mosaic: { exitCode: 0 } as Esito,
+    comandi: [] as { argv: string[]; timeoutMs?: number }[],
+    env: { OS: 'Windows_NT', MOSAICMANAGER_CLI: CLI, MOSAICMANAGER_PREVIEW: IMMAGINI, MOSAICMANAGER_PREVIEW_NOTES: '1' } as Record<string, string>,
+    superfici: ['terminal'] as string[],
+    attesa: null as Promise<void> | null,
+    clock: mock.clock(on),
+  }
+  on('env.get', ($, e) => ({ value: o.env[e.name] }))
+  on('session.surfaces', () => ({ value: o.superfici }) as never)
+  on('session.usage', () => ({ value: { context: { window: 200_000 }, rateLimits: [] } }) as never)
+  on('process.run', async ($, e) => {
     o.comandi.push({ argv: [...e.argv], timeoutMs: e.init?.timeoutMs })
     const esito = e.argv[0] === CLI ? o.mosaic : { exitCode: 1 }
+    if (e.argv[0] === CLI && o.attesa) await o.attesa
     if ('deny' in esito) return esito
     return { value: { exitCode: esito.exitCode, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -89,4 +97,90 @@ test('un markdown dentro Mosaic si apre come sempre, senza chiedere a Mosaic', {
   } as never)
   await ui.press({ key: 'apri-e1' })
   expect(o.comandi.map(c => c.argv)).toEqual([['explorer.exe', 'E:\\repo\\docs\\piano.md']])
+})
+
+const PNG_LETTO = { type: 'image', file: { base64: 'iVBORw0KGgo', type: 'image/png', originalSize: 8 } }
+
+// La nota parte senza che nessuno la aspetti: si lasciano girare le promesse in coda prima di guardare.
+async function svuota() {
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+}
+
+test('la nota a Mosaic chiede le due variabili, tiene solo le estensioni accettate e al massimo 50 percorsi', () => {
+  expect(comandoNotaMosaic(CLI, '1', IMMAGINI, 'made', ['V:/Temp/a.png', 'E:/work/report.pdf', 'C:\\Users\\g\\Foto.JPG'])).toEqual([
+    CLI, 'preview', '--note', 'made', 'V:/Temp/a.png', 'C:\\Users\\g\\Foto.JPG',
+  ])
+  expect(comandoNotaMosaic(CLI, '1', IMMAGINI, 'read', ['V:/Temp/a.png'])).toEqual([CLI, 'preview', '--note', 'read', 'V:/Temp/a.png'])
+  expect(comandoNotaMosaic(undefined, '1', IMMAGINI, 'read', ['V:/Temp/a.png'])).toBeNull()
+  expect(comandoNotaMosaic(CLI, undefined, IMMAGINI, 'read', ['V:/Temp/a.png'])).toBeNull()
+  expect(comandoNotaMosaic(CLI, '', IMMAGINI, 'read', ['V:/Temp/a.png'])).toBeNull()
+  expect(comandoNotaMosaic(CLI, '1', undefined, 'read', ['V:/Temp/a.png'])).toBeNull()
+  expect(comandoNotaMosaic(CLI, '1', IMMAGINI, 'made', ['E:/work/report.pdf', 'E:/repo/piano.md'])).toBeNull()
+  const tanti = Array.from({ length: 60 }, (_, i) => `V:/Temp/shot-${i}.png`)
+  expect(comandoNotaMosaic(CLI, '1', IMMAGINI, 'made', tanti)).toEqual([CLI, 'preview', '--note', 'made', ...tanti.slice(0, 50)])
+})
+
+test("un'immagine letta va a Mosaic anche con le anteprime spente, e la lettura non aspetta la nota", { options: { anteprime: 'no' } }, async ($, on) => {
+  const o = ospite(on)
+  let rilascia = () => {}
+  o.attesa = new Promise<void>(r => (rilascia = r))
+  on('tool.call', () => ({ result: PNG_LETTO }))
+  const esito = await $.tool.call({ tool: 'Read', file_path: 'V:/Temp/schermata.png', tool_use_id: 'r1' } as never)
+  expect(esito).toMatchObject({ result: PNG_LETTO })
+  await svuota()
+  expect(o.comandi).toEqual([{ argv: [CLI, 'preview', '--note', 'read', 'V:/Temp/schermata.png'], timeoutMs: 3000 }])
+  rilascia()
+})
+
+test('niente nota per un file che non è un\'immagine, senza MOSAICMANAGER_PREVIEW_NOTES o fuori dal terminale', { options: { anteprime: 'immagini' } }, async ($, on) => {
+  const o = ospite(on)
+  const risposta = 'V:/Temp/codex/last-message.md'
+  let risultato: unknown = { type: 'text', file: { filePath: risposta, content: '# esito', numLines: 1 } }
+  on('tool.call', () => ({ result: risultato }))
+  o.env.MOSAICMANAGER_PREVIEW = 'png,md'
+  await $.tool.call({ tool: 'Read', file_path: risposta, tool_use_id: 'r1' } as never)
+  await svuota()
+  risultato = PNG_LETTO
+  delete o.env.MOSAICMANAGER_PREVIEW_NOTES
+  await $.tool.call({ tool: 'Read', file_path: 'V:/Temp/schermata.png', tool_use_id: 'r2' } as never)
+  await svuota()
+  o.env.MOSAICMANAGER_PREVIEW_NOTES = '1'
+  o.superfici = ['desktop']
+  await $.tool.call({ tool: 'Read', file_path: 'V:/Temp/schermata.png', tool_use_id: 'r3' } as never)
+  await svuota()
+  expect(o.comandi).toEqual([])
+})
+
+test('se Mosaic rifiuta la nota o non parte, la lettura resta quella e non compare nessun avviso', { options: { anteprime: 'immagini' } }, async ($, on) => {
+  const o = ospite(on)
+  const avvisi: string[] = []
+  on('ui.toast', ($, e) => (avvisi.push(JSON.stringify(e)), { value: undefined }) as never)
+  on('tool.call', () => ({ result: PNG_LETTO }))
+  for (const esito of [{ exitCode: 2 }, { deny: 'ENOENT' }]) {
+    o.mosaic = esito
+    expect(await $.tool.call({ tool: 'Read', file_path: 'V:/Temp/schermata.png', tool_use_id: 'r1' } as never)).toMatchObject({ result: PNG_LETTO })
+  }
+  await svuota()
+  expect(o.comandi.map(c => c.argv[3])).toEqual(['read', 'read'])
+  expect(avvisi).toEqual([])
+})
+
+test('un comando che crea immagini manda una nota sola con quelle, non con gli altri file', { options: { anteprime: 'no' } }, async ($, on) => {
+  const o = ospite(on)
+  await o.clock.advance(1_000_000)
+  const ora = o.clock.now()
+  const creati = ['V:/Temp/shot-1.png', 'V:/Temp/shot-2.jpg', 'V:/Temp/report.pdf']
+  on('session.cwd', () => ({ value: 'V:/Temp' }))
+  on('fs.stat', ($, e) =>
+    creati.includes(e.path.replaceAll('\\', '/'))
+      ? { value: { kind: 'file', size: 10, mtimeMs: ora + 500, isLink: false } }
+      : { deny: 'ENOENT' },
+  )
+  const risultato = { stdout: '', stderr: '', interrupted: false }
+  on('tool.call', () => ({ result: risultato }))
+  const esito = await $.tool.call({ tool: 'PowerShell', command: `python grafici.py ${creati.join(' ')}`, tool_use_id: 'p1' } as never)
+  expect(esito).toMatchObject({ result: risultato })
+  await $.tool.call({ tool: 'Bash', command: 'git status', tool_use_id: 'b1' } as never)
+  await svuota()
+  expect(o.comandi).toEqual([{ argv: [CLI, 'preview', '--note', 'made', 'V:/Temp/shot-1.png', 'V:/Temp/shot-2.jpg'], timeoutMs: 3000 }])
 })
